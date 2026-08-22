@@ -10,3 +10,4 @@ ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().
 DB_PATH = BASE_DIR / "adti.db"
 FILES_DIR = BASE_DIR / "uploads"
 FILES_DIR.mkdir(exist_ok=True)
+SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")  # Google Apps Script URL

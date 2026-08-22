@@ -177,13 +177,14 @@ async def bind_user_to_dept(tg_user_id: int, dept_id: int, role: str = 'staff'):
 
 async def add_entry(dept_id: int, category: str, title: str = '', authors: str = '',
                     year: int = 2026, journal: str = '', doi: str = '',
-                    file_path: str = '', file_id: str = '', notes: str = ''):
+                    file_path: str = '', file_id: str = '', notes: str = '') -> int:
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("""
+        cur = await db.execute("""
             INSERT INTO indicators (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes))
         await db.commit()
+        return cur.lastrowid
 
 
 async def get_dept_summary(dept_id: int) -> dict:
