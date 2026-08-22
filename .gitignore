@@ -1,0 +1,9 @@
+# ADTI Report Bot — файлы которые не нужны на сервере
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.db
+.venv/
+uploads/
+*.log
