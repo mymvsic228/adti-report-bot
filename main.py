@@ -18,11 +18,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL
 from database import (
-    init_db, get_department, get_dept_by_user,
-    bind_user_to_dept, add_entry, get_dept_summary, get_all_summary,
+    init_db, get_department, get_dept_by_user, get_dept_by_code,
+    bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
     DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
-from report_gen import generate_report_docx
+from report_gen import generate_report_docx, generate_codes_docx
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,9 +31,9 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
 
-# ─── FSM ────────────────────────────────────────────────────────────────────
-class SelectDept(StatesGroup):
-    browsing = State()
+# ─── FSM STATES ─────────────────────────────────────────────────────────────
+class AuthState(StatesGroup):
+    waiting_for_code = State()
 
 class AddEntry(StatesGroup):
     choose_category = State()
@@ -47,36 +47,14 @@ def main_kb(user_id: int):
     buttons = [
         [KeyboardButton(text="📁 Ҳисобот қўшиш")],
         [KeyboardButton(text="📊 Кафедрам статистикаси")],
-        [KeyboardButton(text="🔄 Кафедрани ўзгартириш")],
+        [KeyboardButton(text="🚪 Кафедрадан чиқиш")],
     ]
     if user_id in ADMIN_IDS:
         buttons.append([KeyboardButton(text="🏛 Сводный ҳисобот")])
         buttons.append([KeyboardButton(text="📥 Word ҳисобот юклаш")])
+        buttons.append([KeyboardButton(text="🔑 Кафедралар пароллари (Word)")])
         buttons.append([KeyboardButton(text="📋 Google Таблица янгилаш")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
-
-
-def dept_list_kb(page: int = 0):
-    PAGE_SIZE = 8
-    total = len(DEPARTMENTS)
-    start = page * PAGE_SIZE
-    chunk = DEPARTMENTS[start:start + PAGE_SIZE]
-
-    kb = InlineKeyboardBuilder()
-    for dep_id, name, head in chunk:
-        short = name[:40] + '…' if len(name) > 40 else name
-        kb.button(text=f"{dep_id}. {short}", callback_data=f"dept_{dep_id}")
-    kb.adjust(1)
-
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀ Орқа", callback_data=f"page_{page-1}"))
-    if start + PAGE_SIZE < total:
-        nav.append(InlineKeyboardButton(text="Кейинги ▶", callback_data=f"page_{page+1}"))
-    if nav:
-        kb.row(*nav)
-
-    return kb.as_markup()
 
 
 def categories_kb():
@@ -98,7 +76,6 @@ def skip_kb():
 
 # ─── GOOGLE SHEETS SYNC ─────────────────────────────────────────────────────
 async def sync_to_sheets(entry: dict):
-    """Отправляет новую запись в Google Таблицу через Apps Script вебхук"""
     if not SHEET_WEBHOOK_URL:
         return
     try:
@@ -108,7 +85,7 @@ async def sync_to_sheets(entry: dict):
                 json=entry,
                 timeout=aiohttp.ClientTimeout(total=10)
             )
-        logger.info(f"Synced entry to Google Sheets: dept={entry.get('dept_id')}, cat={entry.get('category')}")
+        logger.info(f"Synced entry to Google Sheets: dept={entry.get('dept_id')}")
     except Exception as e:
         logger.warning(f"Google Sheets sync failed: {e}")
 
@@ -122,68 +99,86 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
     if dept:
         await message.answer(
-            f"👋 <b>Хуш келибсиз!</b>\n\n"
-            f"📂 Сизнинг кафедрангиз:\n<i>{dept['name']}</i>\n\n"
+            f"👋 <b>Ассалому алайкум!</b>\n\n"
+            f"📂 <b>Кафедрангиз:</b>\n<i>{dept['name']}</i>\n"
+            f"👤 Мудир: <b>{dept['head_name'] or '—'}</b>\n\n"
             f"Қуйидаги тугмалардан фойдаланинг 👇",
+            reply_markup=main_kb(user_id),
+            parse_mode="HTML"
+        )
+    elif user_id in ADMIN_IDS:
+        await message.answer(
+            f"👑 <b>Ассалому алайкум, Админ!</b>\n\n"
+            f"Сиз бошқарув панелига кирдингиз. Барча 65 та кафедра ҳисоботларини кўришингиз, "
+            f"Word файлини юклаб олишингиз ва кафедралар паролларини тарқатишингиз мумкин 👇",
             reply_markup=main_kb(user_id),
             parse_mode="HTML"
         )
     else:
         await message.answer(
-            "👋 <b>АДТИ Илмий ҳисоботлар тизимига хуш келибсиз!</b>\n\n"
-            "Аввал кафедрангизни танланг 👇",
-            reply_markup=dept_list_kb(0),
+            "🔒 <b>Ассалому алайкум! АДТИ Илмий ҳисоботлар тизими</b>\n\n"
+            "Кафедрангизга кириш учун илмий бўлим томонидан берилган <b>МАХСУС ПАРОЛни (кодни)</b> киритинг:\n\n"
+            "<i>(Масалан: ADTI-01-XXXX)</i>",
+            reply_markup=ReplyKeyboardRemove(),
             parse_mode="HTML"
         )
-        await state.set_state(SelectDept.browsing)
+        await state.set_state(AuthState.waiting_for_code)
 
 
-# ─── ВЫБОР КАФЕДРЫ ──────────────────────────────────────────────────────────
-@dp.callback_query(F.data.startswith("page_"))
-async def paginate_depts(cb: types.CallbackQuery):
-    page = int(cb.data.split("_")[1])
-    await cb.message.edit_reply_markup(reply_markup=dept_list_kb(page))
-    await cb.answer()
+# ─── АВТОРИЗАЦИЯ ПО КОДУ ────────────────────────────────────────────────────
+@dp.message(AuthState.waiting_for_code, F.text)
+async def process_dept_code(message: types.Message, state: FSMContext):
+    code_input = message.text.strip()
+    dept = await get_dept_by_code(code_input)
 
+    if not dept:
+        await message.answer(
+            "❌ <b>Нотўғри парол!</b>\n\n"
+            "Илтимос, кодни қайта текшириб тўғри киритинг ёки Илмий бўлимга мурожаат қилинг:",
+            parse_mode="HTML"
+        )
+        return
 
-@dp.callback_query(F.data.startswith("dept_"))
-async def select_dept(cb: types.CallbackQuery, state: FSMContext):
-    dept_id = int(cb.data.split("_")[1])
-    await bind_user_to_dept(cb.from_user.id, dept_id)
-    dept = await get_department(dept_id)
+    # Привязываем пользователя к кафедре
+    await bind_user_to_dept(message.from_user.id, dept['id'])
     await state.clear()
-    await cb.message.edit_text(
-        f"✅ <b>Кафедра танланди:</b>\n<i>{dept['name']}</i>",
+
+    await message.answer(
+        f"✅ <b>Кафедра тасдиқланди!</b>\n\n"
+        f"📂 <b>{dept['name']}</b>\n"
+        f"👤 Кафедра мудири: <b>{dept['head_name'] or '—'}</b>\n\n"
+        f"Энди ҳисоботларни юборишингиз мумкин 👇",
+        reply_markup=main_kb(message.from_user.id),
         parse_mode="HTML"
     )
-    await cb.message.answer(
-        "Энди ҳисобот қўшишингиз мумкин! 👇",
-        reply_markup=main_kb(cb.from_user.id)
-    )
-    await cb.answer()
 
 
-# ─── СМЕНА КАФЕДРЫ ──────────────────────────────────────────────────────────
-@dp.message(F.text == "🔄 Кафедрани ўзгартириш")
-async def change_dept(message: types.Message, state: FSMContext):
+# ─── ВЫХОД ИЗ КАФЕДРЫ ───────────────────────────────────────────────────────
+@dp.message(F.text == "🚪 Кафедрадан чиқиш")
+async def logout_dept(message: types.Message, state: FSMContext):
+    await unbind_user(message.from_user.id)
     await state.clear()
     await message.answer(
-        "Янги кафедрани танланг:",
-        reply_markup=dept_list_kb(0)
+        "🔓 Сиз кафедрадан чиқдингиз.\n\n"
+        "Бошқа кафедрага кириш учун махсус код-паролни киритинг:",
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="HTML"
     )
-    await state.set_state(SelectDept.browsing)
+    await state.set_state(AuthState.waiting_for_code)
 
 
 # ─── ДОБАВЛЕНИЕ ЗАПИСИ: ШАГ 1 — КАТЕГОРИЯ ───────────────────────────────────
 @dp.message(F.text == "📁 Ҳисобот қўшиш")
 async def add_report_start(message: types.Message, state: FSMContext):
     dept = await get_dept_by_user(message.from_user.id)
-    if not dept:
-        await message.answer("⚠️ Аввал кафедрангизни танланг: /start")
+    if not dept and message.from_user.id not in ADMIN_IDS:
+        await message.answer("⚠️ Аввал кафедра кодини киритинг: /start")
         return
+
+    dept_name = dept['name'] if dept else "Администратор"
     await state.clear()
     await message.answer(
-        f"📂 <b>{dept['name']}</b>\n\nКатегорияни танланг:",
+        f"📂 <b>{dept_name}</b>\n\nКатегорияни танланг:",
         reply_markup=categories_kb(),
         parse_mode="HTML"
     )
@@ -192,7 +187,7 @@ async def add_report_start(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("cat_"), AddEntry.choose_category)
 async def choose_category(cb: types.CallbackQuery, state: FSMContext):
-    cat = cb.data[4:]  # убираем "cat_"
+    cat = cb.data[4:]
     await state.update_data(category=cat)
     label = INDICATOR_LABELS.get(cat, cat)
     await cb.message.edit_text(
@@ -234,11 +229,12 @@ async def enter_authors(message: types.Message, state: FSMContext):
 @dp.message(AddEntry.upload_file, F.document)
 async def receive_doc(message: types.Message, state: FSMContext):
     dept = await get_dept_by_user(message.from_user.id)
+    dept_id = dept['id'] if dept else 1
     f = message.document
     file_id = f.file_id
     fname = f.file_name or f"doc_{file_id}.bin"
 
-    dept_dir = FILES_DIR / str(dept['id'])
+    dept_dir = FILES_DIR / str(dept_id)
     dept_dir.mkdir(parents=True, exist_ok=True)
     dest = dept_dir / fname
 
@@ -251,11 +247,12 @@ async def receive_doc(message: types.Message, state: FSMContext):
 @dp.message(AddEntry.upload_file, F.photo)
 async def receive_photo(message: types.Message, state: FSMContext):
     dept = await get_dept_by_user(message.from_user.id)
+    dept_id = dept['id'] if dept else 1
     f = message.photo[-1]
     file_id = f.file_id
     fname = f"photo_{file_id}.jpg"
 
-    dept_dir = FILES_DIR / str(dept['id'])
+    dept_dir = FILES_DIR / str(dept_id)
     dept_dir.mkdir(parents=True, exist_ok=True)
     dest = dept_dir / fname
 
@@ -272,7 +269,7 @@ async def skip_file(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-# ─── ОТМЕНА В ЛЮБОЙ МОМЕНТ ──────────────────────────────────────────────────
+# ─── ОТМЕНА ──────────────────────────────────────────────────────────────────
 @dp.callback_query(F.data == "cancel")
 async def cancel_action(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
@@ -281,7 +278,7 @@ async def cancel_action(cb: types.CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-# ─── СОХРАНЕНИЕ ЗАПИСИ + СИНХРОНИЗАЦИЯ ──────────────────────────────────────
+# ─── СОХРАНЕНИЕ ЗАПИСИ ──────────────────────────────────────────────────────
 async def save_entry(message: types.Message, state: FSMContext,
                      file_path: str, file_id: str, user_id: int = None):
     if user_id is None:
@@ -289,6 +286,9 @@ async def save_entry(message: types.Message, state: FSMContext,
 
     data = await state.get_data()
     dept = await get_dept_by_user(user_id)
+    dept_id = dept['id'] if dept else 1
+    dept_name = dept['name'] if dept else "Админ"
+    head_name = dept['head_name'] if dept else ""
     await state.clear()
 
     cat = data.get('category', '')
@@ -296,7 +296,7 @@ async def save_entry(message: types.Message, state: FSMContext,
     authors = data.get('authors', '')
 
     entry_id = await add_entry(
-        dept_id=dept['id'],
+        dept_id=dept_id,
         category=cat,
         title=title,
         authors=authors,
@@ -305,11 +305,10 @@ async def save_entry(message: types.Message, state: FSMContext,
         file_id=file_id
     )
 
-    # Синхронизация с Google Таблицей
     asyncio.create_task(sync_to_sheets({
-        "dept_id": dept['id'],
-        "dept_name": dept['name'],
-        "head_name": dept['head_name'],
+        "dept_id": dept_id,
+        "dept_name": dept_name,
+        "head_name": head_name,
         "category": cat,
         "category_label": INDICATOR_LABELS.get(cat, cat),
         "title": title,
@@ -320,13 +319,13 @@ async def save_entry(message: types.Message, state: FSMContext,
         "entry_id": entry_id
     }))
 
-    summary = await get_dept_summary(dept['id'])
+    summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
     total_cat = summary.get(cat, 0)
 
     await message.answer(
         f"✅ <b>Қабул қилинди!</b>\n\n"
-        f"📂 <i>{dept['name']}</i>\n"
+        f"📂 <i>{dept_name}</i>\n"
         f"📌 {label}: <b>{total_cat} та</b>\n"
         f"{'📎 Файл сақланди.' if file_path else '📝 Файлсиз сақланди.'}\n"
         f"{'📊 Google Таблицага юборилди.' if SHEET_WEBHOOK_URL else ''}",
@@ -340,7 +339,7 @@ async def save_entry(message: types.Message, state: FSMContext,
 async def my_stats(message: types.Message):
     dept = await get_dept_by_user(message.from_user.id)
     if not dept:
-        await message.answer("⚠️ Аввал кафедрангизни танланг: /start")
+        await message.answer("⚠️ Аввал кафедра паролини киритинг: /start")
         return
 
     summary = await get_dept_summary(dept['id'])
@@ -395,7 +394,7 @@ async def admin_summary(message: types.Message):
         await message.answer(text[i:i+4000], parse_mode="HTML")
 
 
-# ─── ADMIN: WORD ОТЧЁТ ──────────────────────────────────────────────────────
+# ─── ADMIN: WORD ОТЧЁТ ПО ХИСАБОТУ ──────────────────────────────────────────
 @dp.message(F.text == "📥 Word ҳисобот юклаш")
 async def download_report(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
@@ -409,6 +408,24 @@ async def download_report(message: types.Message):
         message.chat.id,
         types.BufferedInputFile(buf.read(), filename="ADTI_2026_hisobot.docx"),
         caption="✅ <b>АДТИ 2026 йил ҳисоботи</b> — барча 65 та кафедра",
+        parse_mode="HTML"
+    )
+
+
+# ─── ADMIN: СКАЧАТЬ СПИСОК ПАРОЛЕЙ ВСЕХ 65 КАФЕДР ──────────────────────────
+@dp.message(F.text == "🔑 Кафедралар пароллари (Word)")
+async def download_passwords(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("⏳ Пароллар ҳужжати тайёрланмоқда...")
+    buf = await generate_codes_docx(DEPARTMENTS)
+
+    await bot.send_document(
+        message.chat.id,
+        types.BufferedInputFile(buf.read(), filename="ADTI_Kafedralar_Parollari.docx"),
+        caption="🔑 <b>АДТИ: Барча 65 та кафедра учун кириш пароллари (кодлари)</b>\n\n"
+                "Ушбу ҳужжатни чиқариб ёки мудирларга тарқатишингиз мумкин. Ҳар бир кафедра фақат ўз пароли орқали киради!",
         parse_mode="HTML"
     )
 
@@ -458,9 +475,8 @@ async def force_sync_sheets(message: types.Message):
 
 # ─── KEEP-ALIVE HTTP СЕРВЕР ─────────────────────────────────────────────────
 async def health_handler(request):
-    """Endpoint для UptimeRobot / пинга — держит Render живым"""
     return web.Response(
-        text=json.dumps({"status": "ok", "bot": "ADTI Report Bot", "version": "2.0"}),
+        text=json.dumps({"status": "ok", "bot": "ADTI Report Bot", "version": "2.1"}),
         content_type="application/json"
     )
 
@@ -480,9 +496,8 @@ async def start_web_server():
 # ─── MAIN ───────────────────────────────────────────────────────────────────
 async def main():
     await init_db()
-    logger.info("ADTI Bot v2 started. Polling...")
+    logger.info("ADTI Bot v2.1 started. Polling...")
 
-    # Запускаем HTTP сервер и бот одновременно
     await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
 

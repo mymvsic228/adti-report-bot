@@ -1,7 +1,15 @@
 import aiosqlite
+import hashlib
 from config import DB_PATH
 
-DEPARTMENTS = [
+# 65 Кафедр с уникальными паролями доступа (Код: ADTI-{номер}-{хэш-код})
+# Хэш генерируется стабильно, чтобы коды не менялись при перезапуске
+def generate_code(dept_id: int) -> str:
+    salt = f"adti_secret_2026_dept_{dept_id}"
+    h = hashlib.sha256(salt.encode()).hexdigest().upper()[:4]
+    return f"ADTI-{dept_id:02d}-{h}"
+
+RAW_DEPARTMENTS = [
     (1, "Ички касалликлар пропедевтикаси кафедраси", "Мусашайхов Умиджон Хусанович"),
     (2, "Факультет терапия кафедраси", "Хужамбердиев Мамазаир"),
     (3, "Госпитал терапия ва эндокринология кафедраси", "Юсупова Шахноза Кадиржановна"),
@@ -69,6 +77,12 @@ DEPARTMENTS = [
     (65, "ВМО ва ҚТ факультети травматология-ортопедия, нейрохирургия, стоматология, юз-жағ хирургияси, суд тиббиёт экспертизаси, реабилитология ва спорт тиббиёти кафедраси", "Холиқов Шавкатбек"),
 ]
 
+# Полный список с паролями
+DEPARTMENTS = [
+    (d[0], d[1], d[2], generate_code(d[0]))
+    for d in RAW_DEPARTMENTS
+]
+
 # Категории научных показателей (соответствуют столбцам в Word-отчёте)
 INDICATORS = [
     ("dsc",             "🎓 DSc диссертация ҳимояси"),
@@ -98,6 +112,7 @@ async def init_db():
                 id INTEGER PRIMARY KEY,
                 name TEXT NOT NULL,
                 head_name TEXT,
+                access_code TEXT UNIQUE,
                 tg_user_id INTEGER DEFAULT 0
             )
         """)
@@ -128,15 +143,17 @@ async def init_db():
         """)
         await db.commit()
 
-        # Заполняем кафедры при первом запуске
-        existing = await db.execute("SELECT COUNT(*) FROM departments")
-        count = (await existing.fetchone())[0]
-        if count == 0:
-            await db.executemany(
-                "INSERT OR IGNORE INTO departments (id, name, head_name) VALUES (?, ?, ?)",
-                DEPARTMENTS
-            )
-            await db.commit()
+        # Добавляем или обновляем пароли кафедр
+        for dep_id, name, head, code in DEPARTMENTS:
+            await db.execute("""
+                INSERT INTO departments (id, name, head_name, access_code)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    head_name=excluded.head_name,
+                    access_code=excluded.access_code
+            """, (dep_id, name, head, code))
+        await db.commit()
 
 
 async def get_all_departments():
@@ -150,6 +167,18 @@ async def get_department(dept_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT * FROM departments WHERE id = ?", (dept_id,))
+        return await cur.fetchone()
+
+
+async def get_dept_by_code(code: str):
+    """Поиск кафедры по секретному коду (регистронезависимо)"""
+    clean_code = code.strip().upper()
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM departments WHERE UPPER(TRIM(access_code)) = ?",
+            (clean_code,)
+        )
         return await cur.fetchone()
 
 
@@ -172,6 +201,13 @@ async def bind_user_to_dept(tg_user_id: int, dept_id: int, role: str = 'staff'):
             "INSERT OR REPLACE INTO dept_users (tg_user_id, dept_id, role) VALUES (?, ?, ?)",
             (tg_user_id, dept_id, role)
         )
+        await db.commit()
+
+
+async def unbind_user(tg_user_id: int):
+    """Отвязывает пользователя от кафедры при выходе"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM dept_users WHERE tg_user_id = ?", (tg_user_id,))
         await db.commit()
 
 
@@ -203,7 +239,7 @@ async def get_all_summary() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
-            SELECT d.id, d.name, d.head_name,
+            SELECT d.id, d.name, d.head_name, d.access_code,
                 SUM(CASE WHEN i.category='scopus_wos' THEN 1 ELSE 0 END) as scopus_wos,
                 SUM(CASE WHEN i.category='phd' THEN 1 ELSE 0 END) as phd,
                 SUM(CASE WHEN i.category='dsc' THEN 1 ELSE 0 END) as dsc,
@@ -222,20 +258,4 @@ async def get_all_summary() -> list:
             GROUP BY d.id
             ORDER BY d.id
         """)
-        return await cur.fetchall()
-
-
-async def get_dept_entries(dept_id: int, category: str = None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        if category:
-            cur = await db.execute(
-                "SELECT * FROM indicators WHERE dept_id = ? AND category = ? ORDER BY created_at DESC",
-                (dept_id, category)
-            )
-        else:
-            cur = await db.execute(
-                "SELECT * FROM indicators WHERE dept_id = ? ORDER BY created_at DESC",
-                (dept_id,)
-            )
         return await cur.fetchall()

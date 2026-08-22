@@ -84,3 +84,54 @@ async def generate_report_docx(summary_rows: list) -> io.BytesIO:
     doc.save(buf)
     buf.seek(0)
     return buf
+
+
+async def generate_codes_docx(departments: list) -> io.BytesIO:
+    """
+    Генерирует Word-файл с индивидуальными кодами доступа для всех 65 кафедр
+    (для передачи завкафедрами)
+    """
+    doc = Document()
+
+    title = doc.add_paragraph()
+    title.alignment = 1
+    run = title.add_run("АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ\n")
+    run.bold = True
+    run.font.size = Pt(13)
+    run2 = title.add_run("КАФЕДРАЛАР УЧУН ТЕЛЕГРАМ БОТГА КИРИШ МАХСУС ПАРОЛЛАРИ (КОДЛАРИ)")
+    run2.bold = True
+    run2.font.size = Pt(11)
+
+    doc.add_paragraph("Ушбу махсус кодлар ҳар бир кафедра мудири ёки масъул ходимига берилади. Ботга биринчи марта кирганда ушбу код киритилади.\n")
+
+    table = doc.add_table(rows=1, cols=4)
+    table.style = "Table Grid"
+
+    hdr = table.rows[0].cells
+    hdr[0].text = "Т/Р"
+    hdr[1].text = "Кафедра номи"
+    hdr[2].text = "Кафедра мудири"
+    hdr[3].text = "КИРИШ КОДИ (ПАРОЛ)"
+
+    for i in range(4):
+        hdr[i].paragraphs[0].runs[0].bold = True
+
+    for dep_id, name, head, code in departments:
+        row = table.add_row().cells
+        row[0].text = str(dep_id)
+        row[1].text = name
+        row[2].text = head or ''
+        row[3].text = code
+        row[3].paragraphs[0].runs[0].bold = True
+
+    for row in table.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.font.size = Pt(9)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
+
