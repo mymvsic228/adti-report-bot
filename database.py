@@ -259,3 +259,18 @@ async def get_all_summary() -> list:
             ORDER BY d.id
         """)
         return await cur.fetchall()
+
+
+async def get_all_detailed_entries() -> list:
+    """Возвращает все добавленные отчёты со всеми деталями"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
+                   i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.notes
+            FROM indicators i
+            JOIN departments d ON i.dept_id = d.id
+            ORDER BY i.created_at DESC
+        """)
+        return await cur.fetchall()
+

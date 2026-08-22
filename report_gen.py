@@ -135,3 +135,163 @@ async def generate_codes_docx(departments: list) -> io.BytesIO:
     buf.seek(0)
     return buf
 
+
+async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.BytesIO:
+    """
+    Генерирует официальный Excel (.xlsx) отчёт с двумя листами:
+    1. «Сводка» — таблица 65 кафедр по всем 17 индикаторам с авто-суммами
+    2. «Барча ҳисоботлар» — полная база всех отправленных записей
+    """
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+
+    # Стили
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    total_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
+    bold_font = Font(name="Calibri", size=10, bold=True)
+    regular_font = Font(name="Calibri", size=10)
+    
+    thin_border = Border(
+        left=Side(style="thin", color="D9D9D9"),
+        right=Side(style="thin", color="D9D9D9"),
+        top=Side(style="thin", color="D9D9D9"),
+        bottom=Side(style="thin", color="D9D9D9")
+    )
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    # ─── ЛИСТ 1: СВОДКА ──────────────────────────────────────────────────────
+    ws1 = wb.active
+    ws1.title = "Сводка 65 кафедр"
+    ws1.views.sheetView[0].showGridLines = True
+
+    # Заголовок
+    ws1.merge_cells("A1:R1")
+    title_cell = ws1["A1"]
+    title_cell.value = "АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — 2026 ЙИЛ ИЛМИЙ ХИСОБОТИ"
+    title_cell.font = Font(name="Calibri", size=14, bold=True, color="1F4E79")
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws1.row_dimensions[1].height = 30
+
+    col_headers = [
+        "Т/Р", "Кафедра номи", "Кафедра мудири",
+        "DSc", "PhD", "Монография", "Патент",
+        "ЎзОАК", "Россия ОАК/IF",
+        "Тезис (Ўз)", "Тезис (Хор)",
+        "Scopus/WoS",
+        "Рац.таклиф", "Амалиётга тадбиқ",
+        "Анжуман", "Хўж.шартн.", "Грант", "Жами"
+    ]
+
+    ws1.append([])  # Строка 2 пустая
+    ws1.append(col_headers)  # Строка 3 заголовки
+    ws1.row_dimensions[3].height = 28
+
+    for col_num in range(1, len(col_headers) + 1):
+        c = ws1.cell(row=3, column=col_num)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = center_align
+        c.border = thin_border
+
+    totals = [0] * (len(col_headers) - 3)
+
+    for r in summary_rows:
+        row_vals = [
+            r['id'], r['name'], r['head_name'] or '',
+            r['dsc'] or 0, r['phd'] or 0, r['monography'] or 0, r['patent'] or 0,
+            r['oak_uz'] or 0, r['oak_ru_if'] or 0,
+            r['thesis_uz'] or 0, r['thesis_foreign'] or 0,
+            r['scopus_wos'] or 0,
+            r['rationalizer'] or 0, r['implementation'] or 0,
+            r['conferences'] or 0, 0, 0,
+            r['total'] or 0
+        ]
+        ws1.append(row_vals)
+        curr_row = ws1.max_row
+        ws1.row_dimensions[curr_row].height = 20
+
+        for idx, val in enumerate(row_vals):
+            cell = ws1.cell(row=curr_row, column=idx + 1)
+            cell.font = regular_font
+            cell.border = thin_border
+            if idx == 1:
+                cell.alignment = left_align
+            else:
+                cell.alignment = center_align
+
+            if idx >= 3 and isinstance(val, (int, float)):
+                totals[idx - 3] += val
+
+    # Итоговая строка
+    total_row_vals = ["", "ЖАМИ (Институт бўйича):", ""] + totals
+    ws1.append(total_row_vals)
+    tot_row_num = ws1.max_row
+    ws1.row_dimensions[tot_row_num].height = 24
+
+    for col_num in range(1, len(total_row_vals) + 1):
+        cell = ws1.cell(row=tot_row_num, column=col_num)
+        cell.font = bold_font
+        cell.fill = total_fill
+        cell.border = thin_border
+        cell.alignment = left_align if col_num == 2 else center_align
+
+    # ─── ЛИСТ 2: ДЕТАЛЬНЫЕ ЗАПИСИ ────────────────────────────────────────────
+    ws2 = wb.create_sheet(title="Барча ҳисоботлар (База)")
+    ws2.views.sheetView[0].showGridLines = True
+
+    from database import INDICATOR_LABELS
+    det_headers = [
+        "ID", "Сана/Вақт", "Кафедра ID", "Кафедра номи", "Кафедра мудири",
+        "Категория", "Иш номи", "Муаллифлар", "Йил", "Файл борми?"
+    ]
+    ws2.append(det_headers)
+    ws2.row_dimensions[1].height = 26
+
+    for col_num in range(1, len(det_headers) + 1):
+        c = ws2.cell(row=1, column=col_num)
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = center_align
+        c.border = thin_border
+
+    for d in detailed_rows:
+        has_f = "✅ Ҳа" if d['file_path'] else "❌ Йўқ"
+        cat_lbl = INDICATOR_LABELS.get(d['category'], d['category'])
+        r_data = [
+            d['id'], str(d['created_at']), d['dept_id'], d['dept_name'],
+            d['head_name'] or '', cat_lbl, d['title'] or '',
+            d['authors'] or '', d['year'] or 2026, has_f
+        ]
+        ws2.append(r_data)
+        curr = ws2.max_row
+        for col_idx in range(1, len(r_data) + 1):
+            cell = ws2.cell(row=curr, column=col_idx)
+            cell.font = regular_font
+            cell.border = thin_border
+            cell.alignment = left_align if col_idx in (4, 7, 8) else center_align
+
+    # Автоширина колонок
+    for ws in (ws1, ws2):
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                val = str(cell.value or '')
+                if len(val) > max_len and '\n' not in val:
+                    max_len = len(val)
+            ws.column_dimensions[col_letter].width = min(max(max_len + 3, 10), 45)
+
+    ws1.column_dimensions["B"].width = 38
+    ws1.column_dimensions["C"].width = 28
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+

@@ -20,9 +20,10 @@ from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL
 from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
+    get_all_detailed_entries,
     DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
-from report_gen import generate_report_docx, generate_codes_docx
+from report_gen import generate_report_docx, generate_codes_docx, generate_report_excel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,9 +52,9 @@ def main_kb(user_id: int):
     ]
     if user_id in ADMIN_IDS:
         buttons.append([KeyboardButton(text="🏛 Сводный ҳисобот")])
+        buttons.append([KeyboardButton(text="📊 Excel ҳисобот юклаш (.xlsx)")])
         buttons.append([KeyboardButton(text="📥 Word ҳисобот юклаш")])
         buttons.append([KeyboardButton(text="🔑 Кафедралар пароллари (Word)")])
-        buttons.append([KeyboardButton(text="📋 Google Таблица янгилаш")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
@@ -392,6 +393,27 @@ async def admin_summary(message: types.Message):
     text = "\n".join(lines)
     for i in range(0, len(text), 4000):
         await message.answer(text[i:i+4000], parse_mode="HTML")
+
+
+# ─── ADMIN: EXCEL ОТЧЁТ ПО ХИСАБОТУ (.xlsx) ──────────────────────────────
+@dp.message(F.text == "📊 Excel ҳисобот юклаш (.xlsx)")
+async def download_excel_report(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    await message.answer("⏳ Excel ҳисобот яратиляпти (.xlsx)...")
+    summary_rows = await get_all_summary()
+    detailed_rows = await get_all_detailed_entries()
+    buf = await generate_report_excel(summary_rows, detailed_rows)
+
+    await bot.send_document(
+        message.chat.id,
+        types.BufferedInputFile(buf.read(), filename="ADTI_2026_hisobot.xlsx"),
+        caption="✅ <b>АДТИ 2026 йил Excel ҳисоботи (.xlsx)</b>\n\n"
+                "📊 <b>1-варақ:</b> 65 та кафедра сводкаси (барча 17 индикатор + жами суммалар)\n"
+                "📝 <b>2-варақ:</b> Барча юборилган илмий ишлар базаси (муаллифлар, номлар)",
+        parse_mode="HTML"
+    )
 
 
 # ─── ADMIN: WORD ОТЧЁТ ПО ХИСАБОТУ ──────────────────────────────────────────
