@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL
+from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL, AUDIT_CHANNEL_ID
 from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
@@ -89,6 +89,57 @@ async def sync_to_sheets(entry: dict):
         logger.info(f"Synced entry to Google Sheets: dept={entry.get('dept_id')}")
     except Exception as e:
         logger.warning(f"Google Sheets sync failed: {e}")
+
+
+# ─── AUDIT CHANNEL NOTIFICATIONS ────────────────────────────────────────────
+async def send_to_audit_channel(dept_id: int, dept_name: str, head_name: str,
+                                category_label: str, title: str, authors: str,
+                                file_path: str, file_id: str, entry_id: int):
+    """Мгновенно публикует новый отчёт и файл в закрытый канал руководства"""
+    if not AUDIT_CHANNEL_ID:
+        return
+    try:
+        import datetime
+        now_str = datetime.datetime.now().strftime("%d.%m.%Y | %H:%M")
+        caption = (
+            f"🔔 <b>ЯНГИ ИЛМИЙ ҲИСОБОТ (ID: #{entry_id})</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📂 <b>Кафедра #{dept_id}:</b> {dept_name}\n"
+            f"👤 <b>Мудир:</b> {head_name or '—'}\n"
+            f"📌 <b>Категория:</b> {category_label}\n"
+            f"📝 <b>Иш номи:</b> {title or '—'}\n"
+            f"👥 <b>Муаллифлар:</b> {authors or '—'}\n"
+            f"📅 <b>Вақт:</b> {now_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        if file_id:
+            # Отправляем документ или фото прямо в канал с подписью
+            try:
+                await bot.send_document(AUDIT_CHANNEL_ID, file_id, caption=caption, parse_mode="HTML")
+            except Exception:
+                await bot.send_message(AUDIT_CHANNEL_ID, caption, parse_mode="HTML")
+        else:
+            await bot.send_message(AUDIT_CHANNEL_ID, caption, parse_mode="HTML")
+        logger.info(f"Published audit report #{entry_id} to channel {AUDIT_CHANNEL_ID}")
+    except Exception as e:
+        logger.warning(f"Failed to post to audit channel: {e}")
+
+
+async def notify_delete_to_audit(dept_name: str, entry_id: int):
+    """Уведомляет канал руководства об удалении записи"""
+    if not AUDIT_CHANNEL_ID:
+        return
+    try:
+        text = (
+            f"🗑 <b>ИЛМИЙ ҲИСОБОТ ЎЧИРИЛДИ (ID: #{entry_id})</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📂 <b>Кафедра:</b> {dept_name}\n"
+            f"⚠️ <i>Ушбу ёзув масъул ходим томонидан базадан ўчирилди.</i>"
+        )
+        await bot.send_message(AUDIT_CHANNEL_ID, text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to notify delete to channel: {e}")
+
 
 
 # ─── /start ─────────────────────────────────────────────────────────────────
@@ -320,6 +371,20 @@ async def save_entry(message: types.Message, state: FSMContext,
         "entry_id": entry_id
     }))
 
+    # Мгновенная отправка в канал руководства (Live-лента)
+    asyncio.create_task(send_to_audit_channel(
+        dept_id=dept_id,
+        dept_name=dept_name,
+        head_name=head_name,
+        category_label=INDICATOR_LABELS.get(cat, cat),
+        title=title,
+        authors=authors,
+        file_path=file_path,
+        file_id=file_id,
+        entry_id=entry_id
+    ))
+
+
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
     total_cat = summary.get(cat, 0)
@@ -413,6 +478,8 @@ async def process_delete_entry(cb: types.CallbackQuery):
     success = await delete_entry(entry_id, dept_id)
 
     if success:
+        dept_name = dept['name'] if dept else f"Кафедра #{dept_id}"
+        asyncio.create_task(notify_delete_to_audit(dept_name, entry_id))
         await cb.message.edit_text(
             f"🗑 <b>#{entry_id} рақамли ёзув ўчирилди.</b>\n"
             f"Ҳисобот статистикаси автомат янгиланди.",
@@ -421,6 +488,7 @@ async def process_delete_entry(cb: types.CallbackQuery):
     else:
         await cb.answer("❌ Бу ёзувни ўчириш учун рухсатингиз йўқ ёки у топилмади.", show_alert=True)
     await cb.answer()
+
 
 
 # ─── ADMIN: ОЧИСТКА ТЕСТОВЫХ ДАННЫХ ─────────────────────────────────────────

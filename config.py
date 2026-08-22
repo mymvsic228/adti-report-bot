@@ -11,3 +11,5 @@ DB_PATH = BASE_DIR / "adti.db"
 FILES_DIR = BASE_DIR / "uploads"
 FILES_DIR.mkdir(exist_ok=True)
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")  # Google Apps Script URL
+AUDIT_CHANNEL_ID = os.getenv("AUDIT_CHANNEL_ID", "-1004434194693")
+
