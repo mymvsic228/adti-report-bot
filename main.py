@@ -20,7 +20,7 @@ from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL
 from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
-    get_all_detailed_entries,
+    get_all_detailed_entries, get_dept_entries, delete_entry, clear_all_test_data,
     DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
 from report_gen import generate_report_docx, generate_codes_docx, generate_report_excel
@@ -47,7 +47,7 @@ class AddEntry(StatesGroup):
 def main_kb(user_id: int):
     buttons = [
         [KeyboardButton(text="📁 Ҳисобот қўшиш")],
-        [KeyboardButton(text="📊 Кафедрам статистикаси")],
+        [KeyboardButton(text="📋 Юборилган ишлар (Ўчириш)"), KeyboardButton(text="📊 Кафедрам статистикаси")],
         [KeyboardButton(text="🚪 Кафедрадан чиқиш")],
     ]
     if user_id in ADMIN_IDS:
@@ -358,6 +358,97 @@ async def my_stats(message: types.Message):
 
     lines.append(f"\n📊 <b>Жами: {total} та ёзув</b>")
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ─── ПРОСМОТР И УДАЛЕНИЕ СВОИХ ЗАПИСЕЙ ──────────────────────────────────────
+@dp.message(F.text == "📋 Юборилган ишлар (Ўчириш)")
+async def list_dept_submissions(message: types.Message):
+    user_id = message.from_user.id
+    dept = await get_dept_by_user(user_id)
+    if not dept and user_id not in ADMIN_IDS:
+        await message.answer("⚠️ Аввал кафедра кодини киритинг: /start")
+        return
+
+    dept_id = dept['id'] if dept else 1
+    dept_name = dept['name'] if dept else "Барча кафедралар"
+
+    entries = await get_dept_entries(dept_id, limit=10)
+    if not entries:
+        await message.answer(
+            f"📂 <b>{dept_name}</b>\n\n"
+            f"Ҳозирча юборилган илмий ишлар йўқ.",
+            parse_mode="HTML"
+        )
+        return
+
+    await message.answer(
+        f"📋 <b>{dept_name}</b>\n"
+        f"Сўнгги юборилган ишлар рўйхати:\n"
+        f"<i>(Агар хато киритган бўлсангиз, пастдаги 🗑 тугмани босиб ўчиришингиз мумкин)</i>",
+        parse_mode="HTML"
+    )
+
+    for e in entries:
+        cat_lbl = INDICATOR_LABELS.get(e['category'], e['category'])
+        has_f = "📎 Файл бор" if e['file_path'] else "📝 Файлсиз"
+        text = (
+            f"🔹 <b>#{e['id']} — {cat_lbl}</b>\n"
+            f"📝 <b>Номи:</b> {e['title'] or '—'}\n"
+            f"👤 <b>Муаллифлар:</b> {e['authors'] or '—'}\n"
+            f"📅 Сана: {str(e['created_at'])[:16]} | {has_f}"
+        )
+        del_kb = InlineKeyboardBuilder()
+        del_kb.button(text=f"🗑 Ўчириш (#{e['id']})", callback_data=f"del_entry_{e['id']}")
+        await message.answer(text, reply_markup=del_kb.as_markup(), parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("del_entry_"))
+async def process_delete_entry(cb: types.CallbackQuery):
+    entry_id = int(cb.data.replace("del_entry_", ""))
+    user_id = cb.from_user.id
+    dept = await get_dept_by_user(user_id)
+    is_adm = user_id in ADMIN_IDS
+
+    dept_id = None if is_adm else (dept['id'] if dept else -1)
+    success = await delete_entry(entry_id, dept_id)
+
+    if success:
+        await cb.message.edit_text(
+            f"🗑 <b>#{entry_id} рақамли ёзув ўчирилди.</b>\n"
+            f"Ҳисобот статистикаси автомат янгиланди.",
+            parse_mode="HTML"
+        )
+    else:
+        await cb.answer("❌ Бу ёзувни ўчириш учун рухсатингиз йўқ ёки у топилмади.", show_alert=True)
+    await cb.answer()
+
+
+# ─── ADMIN: ОЧИСТКА ТЕСТОВЫХ ДАННЫХ ─────────────────────────────────────────
+@dp.message(Command("clear_test_data"))
+async def cmd_clear_test(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="⚠️ ҲА, барча тест маълумотларни ўчириш", callback_data="confirm_clear_all")
+    kb.button(text="❌ Бекор қилиш", callback_data="cancel")
+    kb.adjust(1)
+    await message.answer(
+        "⚠️ <b>ДИҚҚАТ!</b>\n\n"
+        "Сиз барча юборилган тест ҳисоботларни базадан бутунлай тозаламоқчисиз.\n"
+        "Ушбу амални фақат тизимни расмий ишга туширишдан олдин бажаринг!",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+
+
+@dp.callback_query(F.data == "confirm_clear_all")
+async def confirm_clear_all(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("Рухсат йўқ", show_alert=True)
+        return
+    await clear_all_test_data()
+    await cb.message.edit_text("✅ <b>Барча тест маълумотлар муваффақиятли тозаланди!</b>\nБаза бўш ва расмий қабулга тайёр.", parse_mode="HTML")
+    await cb.answer()
 
 
 # ─── ADMIN: СВОДНАЯ ТАБЛИЦА ─────────────────────────────────────────────────

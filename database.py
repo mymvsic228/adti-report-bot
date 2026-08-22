@@ -274,3 +274,35 @@ async def get_all_detailed_entries() -> list:
         """)
         return await cur.fetchall()
 
+
+async def get_dept_entries(dept_id: int, limit: int = 15) -> list:
+    """Возвращает список последних записей конкретной кафедры"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT * FROM indicators 
+            WHERE dept_id = ? 
+            ORDER BY created_at DESC 
+            LIMIT ?
+        """, (dept_id, limit))
+        return await cur.fetchall()
+
+
+async def delete_entry(entry_id: int, dept_id: int = None) -> bool:
+    """Удаляет ошибочно добавленную запись"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if dept_id:
+            cur = await db.execute("DELETE FROM indicators WHERE id = ? AND dept_id = ?", (entry_id, dept_id))
+        else:
+            cur = await db.execute("DELETE FROM indicators WHERE id = ?", (entry_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def clear_all_test_data():
+    """Сбрасывает все тестовые данные (для админа перед официальным стартом)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM indicators")
+        await db.commit()
+
+
