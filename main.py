@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import aiohttp
+from aiohttp import web
 import json
 import os
 from pathlib import Path
@@ -455,10 +456,34 @@ async def force_sync_sheets(message: types.Message):
         await message.answer(f"❌ Хатолик: {e}")
 
 
+# ─── KEEP-ALIVE HTTP СЕРВЕР ─────────────────────────────────────────────────
+async def health_handler(request):
+    """Endpoint для UptimeRobot / пинга — держит Render живым"""
+    return web.Response(
+        text=json.dumps({"status": "ok", "bot": "ADTI Report Bot", "version": "2.0"}),
+        content_type="application/json"
+    )
+
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", health_handler)
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health server started on port {port}")
+
+
 # ─── MAIN ───────────────────────────────────────────────────────────────────
 async def main():
     await init_db()
     logger.info("ADTI Bot v2 started. Polling...")
+
+    # Запускаем HTTP сервер и бот одновременно
+    await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
 
 
