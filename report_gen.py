@@ -366,10 +366,12 @@ async def generate_files_zip(bot, entries: list) -> tuple[io.BytesIO, int]:
                 tg_file = await bot.get_file(file_id)
                 f_stream = await bot.download_file(tg_file.file_path)
                 
-                if hasattr(f_stream, 'read'):
-                    content = f_stream.read()
-                elif hasattr(f_stream, 'getvalue'):
+                if hasattr(f_stream, 'getvalue'):
                     content = f_stream.getvalue()
+                elif hasattr(f_stream, 'read'):
+                    if hasattr(f_stream, 'seek'):
+                        f_stream.seek(0)
+                    content = f_stream.read()
                 else:
                     content = bytes(f_stream)
 
