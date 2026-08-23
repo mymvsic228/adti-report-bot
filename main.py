@@ -22,7 +22,7 @@ from database import (
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
     get_all_detailed_entries, get_dept_entries, delete_entry, clear_all_test_data,
     get_entries_by_category, get_files_for_zip, get_entry_by_id, update_entry_title,
-    DEPARTMENTS, INDICATORS, INDICATOR_LABELS
+    update_entry_full, DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
 from report_gen import (
     generate_report_docx, generate_codes_docx, generate_report_excel,
@@ -715,24 +715,30 @@ async def save_entry(message: types.Message, state: FSMContext,
     publisher      = data.get('publisher', '')
     amount         = data.get('amount', '')
 
-    entry_id = await add_entry(
-        dept_id=dept_id,
-        category=cat,
-        title=title,
-        authors=authors,
-        year=2026,
-        file_path=file_path,
-        file_id=file_id,
-        country=country,
-        journal_name=journal_name,
-        pub_date=pub_date,
-        url=url,
-        authors_count=authors_count,
-        specialty=specialty,
-        reg_number=reg_number,
-        publisher=publisher,
-        amount=amount,
+    entry_data = dict(
+        category=cat, title=title, authors=authors, year=2026,
+        file_path=file_path, file_id=file_id,
+        country=country, journal_name=journal_name, pub_date=pub_date, url=url,
+        authors_count=authors_count, specialty=specialty, reg_number=reg_number,
+        publisher=publisher, amount=amount,
     )
+
+    editing_id = data.get('editing_entry_id')
+    if editing_id:
+        # ── РЕЖИМ РЕДАКТИРОВАНИЯ: UPDATE существующей записи ──
+        await update_entry_full(editing_id, entry_data)
+        entry_id = editing_id
+        is_edit = True
+    else:
+        # ── РЕЖИМ СОЗДАНИЯ: INSERT новой записи ──
+        entry_id = await add_entry(
+            dept_id=dept_id, category=cat, title=title, authors=authors, year=2026,
+            file_path=file_path, file_id=file_id,
+            country=country, journal_name=journal_name, pub_date=pub_date, url=url,
+            authors_count=authors_count, specialty=specialty, reg_number=reg_number,
+            publisher=publisher, amount=amount,
+        )
+        is_edit = False
 
     asyncio.create_task(sync_to_sheets({
         "dept_id": dept_id,
@@ -781,17 +787,20 @@ async def save_entry(message: types.Message, state: FSMContext,
         entry_id=entry_id,
         extra_lines=extra_lines,
     ))
-    asyncio.create_task(backup_database_to_channel(reason=f"Янги ҳисобот: #{entry_id} ({dept_name})"))
+    reason = f"Таҳрирланди: #{entry_id} ({dept_name})" if is_edit else f"Янги ҳисобот: #{entry_id} ({dept_name})"
+    asyncio.create_task(backup_database_to_channel(reason=reason))
     asyncio.create_task(sync_sheets_background())
 
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
     total_cat = summary.get(cat, 0)
     has_file_str = "📎 Ҳужжат бириктирилди" if file_path or file_id else "📝 Файлсиз сақланди"
+    header = "✏️ <b>ҲИСОБОТ МУВАФФАҚИЯТЛИ ЯНГИЛАНДИ!</b>" if is_edit else "✅ <b>ҲИСОБОТ МУВАФФАҚИЯТЛИ САҚЛАНДИ!</b>"
 
     await message.answer(
-        f"✅ <b>ҲИСОБОТ МУВАФФАҚИЯТЛИ САҚЛАНДИ!</b>\n"
+        f"{header}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📑 <b>Ҳисобот ID:</b> #{entry_id}\n"
         f"📂 <b>Кафедра:</b> {dept_name}\n"
         f"📌 <b>Категория:</b> {label}\n"
         f"📝 <b>Иш номи:</b> {title}\n"
@@ -904,7 +913,7 @@ async def list_dept_submissions(message: types.Message):
             f"└ 📄 <b>Ҳолати:</b> {has_f}"
         )
         row_kb = InlineKeyboardBuilder()
-        row_kb.button(text="✏️ Номини таҳрирлаш", callback_data=f"edit_title_{e['id']}")
+        row_kb.button(text="✏️ Таҳрирлаш (барча майдонлар)", callback_data=f"edit_entry_{e['id']}")
         if e['file_id']:
             row_kb.button(text="📥 Ҳужжатни кўриш", callback_data=f"getfile_{e['id']}")
         row_kb.button(text=f"🗑 Ўчириш", callback_data=f"del_entry_{e['id']}")
@@ -912,10 +921,11 @@ async def list_dept_submissions(message: types.Message):
         await message.answer(text, reply_markup=row_kb.as_markup(), parse_mode="HTML")
 
 
-# ─── РЕДАКТИРОВАНИЕ НАЗВАНИЯ / ТЕМЫ ЗАПИСИ ──────────────────────────────────
-@dp.callback_query(F.data.startswith("edit_title_"))
-async def start_edit_entry_title(cb: types.CallbackQuery, state: FSMContext):
-    entry_id = int(cb.data.replace("edit_title_", ""))
+# ─── ПОЛНОЕ РЕДАКТИРОВАНИЕ ЗАПИСИ ───────────────────────────────────────────
+@dp.callback_query(F.data.startswith("edit_entry_"))
+async def start_edit_entry_full(cb: types.CallbackQuery, state: FSMContext):
+    """Запускает полный повторный ввод всех полей записи"""
+    entry_id = int(cb.data.replace("edit_entry_", ""))
     user_id = cb.from_user.id
     dept = await get_dept_by_user(user_id)
     is_admin = user_id in ADMIN_IDS
@@ -929,19 +939,20 @@ async def start_edit_entry_title(cb: types.CallbackQuery, state: FSMContext):
         await cb.answer("❌ Бу ҳисоботни таҳрирлаш учун рухсатингиз йўқ", show_alert=True)
         return
 
+    cat = entry['category']
+    cat_lbl = INDICATOR_LABELS.get(cat, cat)
+    current_title = entry['title'] or '—'
+
     await state.clear()
     await state.update_data(
         editing_entry_id=entry_id,
+        category=cat,
         dept_id=entry['dept_id'],
-        dept_name=entry.get('dept_name', '')
+        dept_name=entry.get('dept_name', ''),
+        head_name=entry.get('head_name', ''),
+        extra_step_index=0,
     )
-    await state.set_state(EditTitleState.waiting_for_new_title)
-
-    cancel_kb = InlineKeyboardBuilder()
-    cancel_kb.button(text="❌ Бекор қилиш", callback_data="cancel")
-
-    current_title = entry['title'] if entry['title'] and entry['title'].strip() and entry['title'] != '—' else "<i>(Мавзу киритилмаган)</i>"
-    cat_lbl = INDICATOR_LABELS.get(entry['category'], entry['category'])
+    await state.set_state(AddEntry.enter_title)
 
     await cb.message.answer(
         f"✏️ <b>#{entry_id}-РАҚАМЛИ ҲИСОБОТНИ ТАҲРИРЛАШ</b>\n"
@@ -949,47 +960,13 @@ async def start_edit_entry_title(cb: types.CallbackQuery, state: FSMContext):
         f"📂 <b>Кафедра:</b> {entry.get('dept_name', '')}\n"
         f"📌 <b>Бўлим:</b> {cat_lbl}\n"
         f"📝 <b>Ҳозирги номи:</b> {current_title}\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"✍️ <b>Ушбу иш учун янги ном (мавзу)ни ёзиб юборинг:</b>\n"
-        f"<i>(Масалан: Янги дори воситасини клиник олди синовлари)</i>",
-        reply_markup=cancel_kb.as_markup(),
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⬇️ Барча майдонларни қайта киритинг. Файлни ҳам алмаштириш мумкин.\n\n"
+        f"📝 <b>[1/N-қадам] Иш номини (мавзусини) киритинг:</b>\n"
+        f"<i>(Ёки аввалгисини: {current_title})</i>",
         parse_mode="HTML"
     )
     await cb.answer()
-
-
-@dp.message(EditTitleState.waiting_for_new_title, F.text)
-async def process_new_entry_title(message: types.Message, state: FSMContext):
-    new_title = message.text.strip()
-    if not new_title:
-        await message.answer("⚠️ Илтимос, бўш бўлмаган ном киритинг:")
-        return
-
-    data = await state.get_data()
-    entry_id = data.get('editing_entry_id')
-    dept_id = data.get('dept_id')
-    dept_name = data.get('dept_name', '')
-
-    await state.clear()
-
-    success = await update_entry_title(entry_id, new_title)
-    if success:
-        # Аудит-каналга хабар
-        asyncio.create_task(notify_edit_to_audit(dept_name, entry_id, new_title))
-        asyncio.create_task(sync_sheets_background())
-
-        await message.answer(
-            f"✅ <b>ҲИСОБОТ НОМИ МУВАФФАҚИЯТЛИ ЯНГИЛАНДИ!</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📑 <b>Ҳисобот ID:</b> #{entry_id}\n"
-            f"📝 <b>Янги номи:</b> {new_title}\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Барча маълумотлар ва Google Таблица автомат янгиланди.",
-            reply_markup=main_kb(message.from_user.id),
-            parse_mode="HTML"
-        )
-    else:
-        await message.answer("❌ Таҳрирлашда хатолик юз берди.", reply_markup=main_kb(message.from_user.id))
 
 
 @dp.callback_query(F.data.startswith("del_entry_"))
@@ -1140,7 +1117,7 @@ async def browse_category_entries(cb: types.CallbackQuery):
         )
 
         card_kb = InlineKeyboardBuilder()
-        card_kb.button(text="✏️ Номини таҳрирлаш", callback_data=f"edit_title_{e['id']}")
+        card_kb.button(text="✏️ Таҳрирлаш (барча майдонлар)", callback_data=f"edit_entry_{e['id']}")
         if e['file_id']:
             card_kb.button(text="📥 Ҳужжатни юклаб олиш (PDF/Скан)", callback_data=f"getfile_{e['id']}")
         card_kb.adjust(1)

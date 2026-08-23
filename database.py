@@ -705,3 +705,39 @@ async def update_entry_title(entry_id: int, new_title: str, dept_id: int = None)
         return True
 
 
+async def update_entry_full(entry_id: int, data: dict) -> bool:
+    """Полностью обновляет все поля записи отчёта по её ID.
+    Файл обновляется только если в data есть непустой 'file_id'."""
+    fields = ['title', 'authors', 'country', 'journal_name', 'pub_date',
+              'url', 'authors_count', 'specialty', 'reg_number', 'publisher', 'amount']
+
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            sets = ", ".join(f"{f} = ${i+1}" for i, f in enumerate(fields))
+            params = [data.get(f, '') for f in fields]
+
+            if data.get('file_id'):
+                n = len(params)
+                sets += f", file_id = ${n+1}, file_path = ${n+2}"
+                params += [data['file_id'], data.get('file_path', '')]
+
+            params.append(entry_id)
+            await conn.execute(
+                f"UPDATE indicators SET {sets} WHERE id = ${len(params)}",
+                *params
+            )
+            return True
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        sets = ", ".join(f"{f} = ?" for f in fields)
+        params = [data.get(f, '') for f in fields]
+
+        if data.get('file_id'):
+            sets += ", file_id = ?, file_path = ?"
+            params += [data['file_id'], data.get('file_path', '')]
+
+        params.append(entry_id)
+        await db.execute(f"UPDATE indicators SET {sets} WHERE id = ?", tuple(params))
+        await db.commit()
+        return True
