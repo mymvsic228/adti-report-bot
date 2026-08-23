@@ -10,6 +10,8 @@ DEFAULT_ADMINS = [1167433460, 1530089636]
 env_admins = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 ADMIN_IDS = list(set(DEFAULT_ADMINS + env_admins))
 
+DEFAULT_DATABASE_URL = "postgresql://neondb_owner:npg_VEvwLW1S6FfJ@ep-cool-moon-b297m0yt.c-6.eu-central-1.aws.neon.tech/neondb?sslmode=require"
+DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 DB_PATH = BASE_DIR / "adti.db"
 FILES_DIR = BASE_DIR / "uploads"
 FILES_DIR.mkdir(exist_ok=True)

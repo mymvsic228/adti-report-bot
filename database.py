@@ -1,6 +1,10 @@
 import aiosqlite
+import asyncpg
 import hashlib
-from config import DB_PATH
+import logging
+from config import DATABASE_URL, DB_PATH
+
+logger = logging.getLogger(__name__)
 
 # 65 Кафедр с уникальными паролями доступа (Код: ADTI-{номер}-{хэш-код})
 # Хэш генерируется стабильно, чтобы коды не менялись при перезапуске
@@ -105,7 +109,75 @@ INDICATOR_KEYS = [k for k, _ in INDICATORS]
 INDICATOR_LABELS = {k: v for k, v in INDICATORS}
 
 
+# ─── ASYNCPG POOL ───────────────────────────────────────────────────────────
+_pg_pool = None
+
+async def get_pg_pool():
+    global _pg_pool
+    if _pg_pool is None and DATABASE_URL:
+        try:
+            _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
+            logger.info("Connected to PostgreSQL pool successfully.")
+        except Exception as e:
+            logger.error(f"Failed to connect to PostgreSQL: {e}")
+            _pg_pool = None
+    return _pg_pool
+
+
 async def init_db():
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS departments (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    head_name TEXT,
+                    access_code TEXT UNIQUE,
+                    tg_user_id BIGINT DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS indicators (
+                    id SERIAL PRIMARY KEY,
+                    dept_id INTEGER NOT NULL REFERENCES departments(id),
+                    category TEXT NOT NULL,
+                    title TEXT,
+                    authors TEXT,
+                    year INTEGER,
+                    journal TEXT,
+                    doi TEXT,
+                    file_path TEXT,
+                    file_id TEXT,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    country TEXT DEFAULT '',
+                    journal_name TEXT DEFAULT '',
+                    pub_date TEXT DEFAULT '',
+                    url TEXT DEFAULT '',
+                    authors_count TEXT DEFAULT '',
+                    specialty TEXT DEFAULT '',
+                    reg_number TEXT DEFAULT '',
+                    publisher TEXT DEFAULT ''
+                );
+                CREATE TABLE IF NOT EXISTS dept_users (
+                    tg_user_id BIGINT NOT NULL,
+                    dept_id INTEGER NOT NULL,
+                    role TEXT DEFAULT 'staff',
+                    PRIMARY KEY (tg_user_id, dept_id)
+                );
+            """)
+            for dep_id, name, head, code in DEPARTMENTS:
+                await conn.execute("""
+                    INSERT INTO departments (id, name, head_name, access_code)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        head_name = EXCLUDED.head_name,
+                        access_code = EXCLUDED.access_code;
+                """, dep_id, name, head, code)
+        logger.info("PostgreSQL database initialized with 65 departments.")
+        return
+
+    # Fallback to SQLite
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS departments (
@@ -143,25 +215,23 @@ async def init_db():
         """)
         await db.commit()
 
-        # ── Миграция: добавляем новые столбцы если их нет ─────────────────
         new_columns = [
-            ("country",       "TEXT DEFAULT ''"),   # Страна издания журнала
-            ("journal_name",  "TEXT DEFAULT ''"),   # Название журнала
-            ("pub_date",      "TEXT DEFAULT ''"),   # Год, выпуск, страницы / дата
-            ("url",           "TEXT DEFAULT ''"),   # Ссылка / DOI
-            ("authors_count", "TEXT DEFAULT ''"),   # Количество авторов
-            ("specialty",     "TEXT DEFAULT ''"),   # Шифр и название специальности
-            ("reg_number",    "TEXT DEFAULT ''"),   # Рег. номер (патент)
-            ("publisher",     "TEXT DEFAULT ''"),   # Издательство (монография)
+            ("country",       "TEXT DEFAULT ''"),
+            ("journal_name",  "TEXT DEFAULT ''"),
+            ("pub_date",      "TEXT DEFAULT ''"),
+            ("url",           "TEXT DEFAULT ''"),
+            ("authors_count", "TEXT DEFAULT ''"),
+            ("specialty",     "TEXT DEFAULT ''"),
+            ("reg_number",    "TEXT DEFAULT ''"),
+            ("publisher",     "TEXT DEFAULT ''"),
         ]
         for col_name, col_def in new_columns:
             try:
                 await db.execute(f"ALTER TABLE indicators ADD COLUMN {col_name} {col_def}")
                 await db.commit()
             except Exception:
-                pass  # Колонка уже существует
+                pass
 
-        # Добавляем или обновляем пароли кафедр
         for dep_id, name, head, code in DEPARTMENTS:
             await db.execute("""
                 INSERT INTO departments (id, name, head_name, access_code)
@@ -175,6 +245,12 @@ async def init_db():
 
 
 async def get_all_departments():
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM departments ORDER BY id")
+            return [dict(r) for r in rows]
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT * FROM departments ORDER BY id")
@@ -182,6 +258,12 @@ async def get_all_departments():
 
 
 async def get_department(dept_id: int):
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("SELECT * FROM departments WHERE id = $1", dept_id)
+            return dict(r) if r else None
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("SELECT * FROM departments WHERE id = ?", (dept_id,))
@@ -189,8 +271,16 @@ async def get_department(dept_id: int):
 
 
 async def get_dept_by_code(code: str):
-    """Поиск кафедры по секретному коду (регистронезависимо)"""
     clean_code = code.strip().upper()
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow(
+                "SELECT * FROM departments WHERE UPPER(TRIM(access_code)) = $1",
+                clean_code
+            )
+            return dict(r) if r else None
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -201,7 +291,17 @@ async def get_dept_by_code(code: str):
 
 
 async def get_dept_by_user(tg_user_id: int):
-    """Возвращает кафедру, к которой привязан пользователь"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("""
+                SELECT d.* FROM departments d
+                JOIN dept_users du ON d.id = du.dept_id
+                WHERE du.tg_user_id = $1
+                LIMIT 1
+            """, tg_user_id)
+            return dict(r) if r else None
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
@@ -214,6 +314,16 @@ async def get_dept_by_user(tg_user_id: int):
 
 
 async def bind_user_to_dept(tg_user_id: int, dept_id: int, role: str = 'staff'):
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            await conn.execute("""
+                INSERT INTO dept_users (tg_user_id, dept_id, role)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (tg_user_id, dept_id) DO UPDATE SET role = EXCLUDED.role;
+            """, tg_user_id, dept_id, role)
+            return
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT OR REPLACE INTO dept_users (tg_user_id, dept_id, role) VALUES (?, ?, ?)",
@@ -223,7 +333,12 @@ async def bind_user_to_dept(tg_user_id: int, dept_id: int, role: str = 'staff'):
 
 
 async def unbind_user(tg_user_id: int):
-    """Отвязывает пользователя от кафедры при выходе"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM dept_users WHERE tg_user_id = $1", tg_user_id)
+            return
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM dept_users WHERE tg_user_id = ?", (tg_user_id,))
         await db.commit()
@@ -235,6 +350,20 @@ async def add_entry(dept_id: int, category: str, title: str = '', authors: str =
                     country: str = '', journal_name: str = '', pub_date: str = '',
                     url: str = '', authors_count: str = '', specialty: str = '',
                     reg_number: str = '', publisher: str = '') -> int:
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                INSERT INTO indicators
+                    (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
+                     country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+                        $11, $12, $13, $14, $15, $16, $17, $18)
+                RETURNING id;
+            """, dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
+                  country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher)
+            return row['id']
+
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             INSERT INTO indicators
@@ -248,6 +377,16 @@ async def add_entry(dept_id: int, category: str, title: str = '', authors: str =
 
 
 async def get_dept_summary(dept_id: int) -> dict:
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT category, COUNT(*) as cnt
+                FROM indicators WHERE dept_id = $1
+                GROUP BY category
+            """, dept_id)
+            return {r['category']: r['cnt'] for r in rows}
+
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             SELECT category, COUNT(*) as cnt
@@ -260,6 +399,31 @@ async def get_dept_summary(dept_id: int) -> dict:
 
 async def get_all_summary() -> list:
     """Сводная таблица по всем кафедрам"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT d.id, d.name, d.head_name, d.access_code,
+                    SUM(CASE WHEN i.category='scopus_wos' THEN 1 ELSE 0 END) as scopus_wos,
+                    SUM(CASE WHEN i.category='phd' THEN 1 ELSE 0 END) as phd,
+                    SUM(CASE WHEN i.category='dsc' THEN 1 ELSE 0 END) as dsc,
+                    SUM(CASE WHEN i.category='monography' THEN 1 ELSE 0 END) as monography,
+                    SUM(CASE WHEN i.category='patent' THEN 1 ELSE 0 END) as patent,
+                    SUM(CASE WHEN i.category='oak_uz' THEN 1 ELSE 0 END) as oak_uz,
+                    SUM(CASE WHEN i.category='oak_ru_if' THEN 1 ELSE 0 END) as oak_ru_if,
+                    SUM(CASE WHEN i.category='thesis_uz' THEN 1 ELSE 0 END) as thesis_uz,
+                    SUM(CASE WHEN i.category='thesis_foreign' THEN 1 ELSE 0 END) as thesis_foreign,
+                    SUM(CASE WHEN i.category='rationalizer' THEN 1 ELSE 0 END) as rationalizer,
+                    SUM(CASE WHEN i.category='implementation' THEN 1 ELSE 0 END) as implementation,
+                    SUM(CASE WHEN i.category='conferences' THEN 1 ELSE 0 END) as conferences,
+                    COUNT(i.id) as total
+                FROM departments d
+                LEFT JOIN indicators i ON d.id = i.dept_id
+                GROUP BY d.id
+                ORDER BY d.id
+            """)
+            return [dict(r) for r in rows]
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
@@ -287,6 +451,20 @@ async def get_all_summary() -> list:
 
 async def get_all_detailed_entries() -> list:
     """Возвращает все добавленные отчёты со всеми деталями"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
+                       i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.file_id, i.notes,
+                       i.country, i.journal_name, i.pub_date, i.url,
+                       i.authors_count, i.specialty, i.reg_number, i.publisher
+                FROM indicators i
+                JOIN departments d ON i.dept_id = d.id
+                ORDER BY i.created_at DESC
+            """)
+            return [dict(r) for r in rows]
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
@@ -303,6 +481,27 @@ async def get_all_detailed_entries() -> list:
 
 async def get_files_for_zip(category: str = None, dept_id: int = None) -> list:
     """Возвращает все записи, у которых прикреплён файл (file_id не пустой)"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            query = """
+                SELECT i.id, i.dept_id, d.name as dept_name, i.category,
+                       i.title, i.authors, i.file_id, i.file_path, i.created_at
+                FROM indicators i
+                JOIN departments d ON i.dept_id = d.id
+                WHERE (i.file_id IS NOT NULL AND i.file_id != '')
+            """
+            params = []
+            if category:
+                params.append(category)
+                query += f" AND i.category = ${len(params)}"
+            if dept_id:
+                params.append(dept_id)
+                query += f" AND i.dept_id = ${len(params)}"
+            query += " ORDER BY i.category, i.dept_id, i.id"
+            rows = await conn.fetch(query, *params)
+            return [dict(r) for r in rows]
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         query = """
@@ -326,6 +525,17 @@ async def get_files_for_zip(category: str = None, dept_id: int = None) -> list:
 
 async def get_dept_entries(dept_id: int, limit: int = 15) -> list:
     """Возвращает список последних записей конкретной кафедры"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM indicators 
+                WHERE dept_id = $1 
+                ORDER BY created_at DESC 
+                LIMIT $2
+            """, dept_id, limit)
+            return [dict(r) for r in rows]
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
@@ -339,6 +549,35 @@ async def get_dept_entries(dept_id: int, limit: int = 15) -> list:
 
 async def get_entries_by_category(category: str, dept_id: int = None, limit: int = 30) -> list:
     """Возвращает записи по категории. Если dept_id задан — только по кафедре."""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            if dept_id:
+                rows = await conn.fetch("""
+                    SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
+                           i.pub_date, i.journal_name, i.country, i.url,
+                           i.specialty, i.reg_number, i.publisher, i.authors_count,
+                           d.name as dept_name
+                    FROM indicators i
+                    JOIN departments d ON i.dept_id = d.id
+                    WHERE i.category = $1 AND i.dept_id = $2
+                    ORDER BY i.created_at DESC
+                    LIMIT $3
+                """, category, dept_id, limit)
+            else:
+                rows = await conn.fetch("""
+                    SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
+                           i.pub_date, i.journal_name, i.country, i.url,
+                           i.specialty, i.reg_number, i.publisher, i.authors_count,
+                           d.name as dept_name
+                    FROM indicators i
+                    JOIN departments d ON i.dept_id = d.id
+                    WHERE i.category = $1
+                    ORDER BY i.created_at DESC
+                    LIMIT $2
+                """, category, limit)
+            return [dict(r) for r in rows]
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if dept_id:
@@ -368,9 +607,17 @@ async def get_entries_by_category(category: str, dept_id: int = None, limit: int
         return await cur.fetchall()
 
 
-
 async def delete_entry(entry_id: int, dept_id: int = None) -> bool:
     """Удаляет ошибочно добавленную запись"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            if dept_id:
+                res = await conn.execute("DELETE FROM indicators WHERE id = $1 AND dept_id = $2", entry_id, dept_id)
+            else:
+                res = await conn.execute("DELETE FROM indicators WHERE id = $1", entry_id)
+            return res.endswith(" 1") or (not res.endswith(" 0"))
+
     async with aiosqlite.connect(DB_PATH) as db:
         if dept_id:
             cur = await db.execute("DELETE FROM indicators WHERE id = ? AND dept_id = ?", (entry_id, dept_id))
@@ -382,6 +629,12 @@ async def delete_entry(entry_id: int, dept_id: int = None) -> bool:
 
 async def clear_all_test_data():
     """Сбрасывает все тестовые данные (для админа перед официальным стартом)"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM indicators")
+            return
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM indicators")
         await db.commit()
