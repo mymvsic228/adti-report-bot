@@ -6,7 +6,7 @@ BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-DEFAULT_ADMINS = [1167433460, 1530089636]
+DEFAULT_ADMINS = [1167433460, 1530089636, 135124772]
 env_admins = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 ADMIN_IDS = list(set(DEFAULT_ADMINS + env_admins))
 
