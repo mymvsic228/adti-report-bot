@@ -648,3 +648,60 @@ async def clear_all_test_data():
         await db.commit()
 
 
+async def get_entry_by_id(entry_id: int):
+    """Возвращает запись отчёта по её ID вместе с данными кафедры"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow("""
+                SELECT i.*, d.name as dept_name, d.head_name
+                FROM indicators i
+                JOIN departments d ON i.dept_id = d.id
+                WHERE i.id = $1
+            """, entry_id)
+            return dict(r) if r else None
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute("""
+            SELECT i.*, d.name as dept_name, d.head_name
+            FROM indicators i
+            JOIN departments d ON i.dept_id = d.id
+            WHERE i.id = ?
+        """, (entry_id,))
+        r = await cur.fetchone()
+        return dict(r) if r else None
+
+
+async def update_entry_title(entry_id: int, new_title: str, dept_id: int = None) -> bool:
+    """Обновляет название/тему работы в базе данных"""
+    pool = await get_pg_pool()
+    if pool:
+        async with pool.acquire() as conn:
+            if dept_id:
+                await conn.execute(
+                    "UPDATE indicators SET title = $1 WHERE id = $2 AND dept_id = $3",
+                    new_title, entry_id, dept_id
+                )
+            else:
+                await conn.execute(
+                    "UPDATE indicators SET title = $1 WHERE id = $2",
+                    new_title, entry_id
+                )
+            return True
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        if dept_id:
+            await db.execute(
+                "UPDATE indicators SET title = ? WHERE id = ? AND dept_id = ?",
+                (new_title, entry_id, dept_id)
+            )
+        else:
+            await db.execute(
+                "UPDATE indicators SET title = ? WHERE id = ?",
+                (new_title, entry_id)
+            )
+        await db.commit()
+        return True
+
+

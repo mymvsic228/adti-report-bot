@@ -21,7 +21,7 @@ from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
     get_all_detailed_entries, get_dept_entries, delete_entry, clear_all_test_data,
-    get_entries_by_category, get_files_for_zip,
+    get_entries_by_category, get_files_for_zip, get_entry_by_id, update_entry_title,
     DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
 from report_gen import (
@@ -42,6 +42,9 @@ class AuthState(StatesGroup):
 
 class RestoreState(StatesGroup):
     waiting_for_db_file = State()
+
+class EditTitleState(StatesGroup):
+    waiting_for_new_title = State()
 
 class AddEntry(StatesGroup):
     choose_category = State()
@@ -234,6 +237,26 @@ async def notify_delete_to_audit(dept_name: str, entry_id: int):
         await bot.send_message(AUDIT_CHANNEL_ID, text, parse_mode="HTML")
     except Exception as e:
         logger.warning(f"Failed to notify delete to channel: {e}")
+
+
+async def notify_edit_to_audit(dept_name: str, entry_id: int, new_title: str):
+    """Уведомляет канал руководства о редактировании названия записи"""
+    if not AUDIT_CHANNEL_ID:
+        return
+    try:
+        import datetime
+        now_str = datetime.datetime.now().strftime("%d.%m.%Y | %H:%M")
+        text = (
+            f"✏️ <b>ИЛМИЙ ҲИСОБОТ НОМИ ТАҲРИРЛАНДИ (ID: #{entry_id})</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📂 <b>Кафедра:</b> {dept_name}\n"
+            f"📝 <b>Янги номи:</b> {new_title}\n"
+            f"📅 <b>Вақт:</b> {now_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        await bot.send_message(AUDIT_CHANNEL_ID, text, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"Failed to notify edit to channel: {e}")
 
 
 # ─── DATABASE BACKUP & RESTORE ──────────────────────────────────────────────
@@ -871,17 +894,102 @@ async def list_dept_submissions(message: types.Message):
     for e in entries:
         cat_lbl = INDICATOR_LABELS.get(e['category'], e['category'])
         has_f = "📎 Ҳужжат бор" if e['file_path'] or e['file_id'] else "📝 Файлсиз"
+        title_str = e['title'].strip() if e['title'] and e['title'].strip() and e['title'].strip() != '—' else "⚠️ <i>(Мавзу киритилмаган)</i>"
         text = (
             f"┌ 📑 <b>Ҳисобот #{e['id']}</b>\n"
             f"├ 📌 <b>Категория:</b> {cat_lbl}\n"
-            f"├ 📝 <b>Иш номи:</b> {e['title'] or '—'}\n"
+            f"├ 📝 <b>Иш номи:</b> {title_str}\n"
             f"├ 👤 <b>Муаллиф:</b> {e['authors'] or '—'}\n"
             f"├ 📅 <b>Сана:</b> {str(e['created_at'])[:16]}\n"
             f"└ 📄 <b>Ҳолати:</b> {has_f}"
         )
-        del_kb = InlineKeyboardBuilder()
-        del_kb.button(text=f"🗑 Ўчириш (#{e['id']})", callback_data=f"del_entry_{e['id']}")
-        await message.answer(text, reply_markup=del_kb.as_markup(), parse_mode="HTML")
+        row_kb = InlineKeyboardBuilder()
+        row_kb.button(text="✏️ Номини таҳрирлаш", callback_data=f"edit_title_{e['id']}")
+        if e['file_id']:
+            row_kb.button(text="📥 Ҳужжатни кўриш", callback_data=f"getfile_{e['id']}")
+        row_kb.button(text=f"🗑 Ўчириш", callback_data=f"del_entry_{e['id']}")
+        row_kb.adjust(1)
+        await message.answer(text, reply_markup=row_kb.as_markup(), parse_mode="HTML")
+
+
+# ─── РЕДАКТИРОВАНИЕ НАЗВАНИЯ / ТЕМЫ ЗАПИСИ ──────────────────────────────────
+@dp.callback_query(F.data.startswith("edit_title_"))
+async def start_edit_entry_title(cb: types.CallbackQuery, state: FSMContext):
+    entry_id = int(cb.data.replace("edit_title_", ""))
+    user_id = cb.from_user.id
+    dept = await get_dept_by_user(user_id)
+    is_admin = user_id in ADMIN_IDS
+
+    entry = await get_entry_by_id(entry_id)
+    if not entry:
+        await cb.answer("❌ Ҳисобот топилмади", show_alert=True)
+        return
+
+    if not is_admin and dept and entry['dept_id'] != dept['id']:
+        await cb.answer("❌ Бу ҳисоботни таҳрирлаш учун рухсатингиз йўқ", show_alert=True)
+        return
+
+    await state.clear()
+    await state.update_data(
+        editing_entry_id=entry_id,
+        dept_id=entry['dept_id'],
+        dept_name=entry.get('dept_name', '')
+    )
+    await state.set_state(EditTitleState.waiting_for_new_title)
+
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Бекор қилиш", callback_data="cancel")
+
+    current_title = entry['title'] if entry['title'] and entry['title'].strip() and entry['title'] != '—' else "<i>(Мавзу киритилмаган)</i>"
+    cat_lbl = INDICATOR_LABELS.get(entry['category'], entry['category'])
+
+    await cb.message.answer(
+        f"✏️ <b>#{entry_id}-РАҚАМЛИ ҲИСОБОТНИ ТАҲРИРЛАШ</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 <b>Кафедра:</b> {entry.get('dept_name', '')}\n"
+        f"📌 <b>Бўлим:</b> {cat_lbl}\n"
+        f"📝 <b>Ҳозирги номи:</b> {current_title}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"✍️ <b>Ушбу иш учун янги ном (мавзу)ни ёзиб юборинг:</b>\n"
+        f"<i>(Масалан: Янги дори воситасини клиник олди синовлари)</i>",
+        reply_markup=cancel_kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+
+@dp.message(EditTitleState.waiting_for_new_title, F.text)
+async def process_new_entry_title(message: types.Message, state: FSMContext):
+    new_title = message.text.strip()
+    if not new_title:
+        await message.answer("⚠️ Илтимос, бўш бўлмаган ном киритинг:")
+        return
+
+    data = await state.get_data()
+    entry_id = data.get('editing_entry_id')
+    dept_id = data.get('dept_id')
+    dept_name = data.get('dept_name', '')
+
+    await state.clear()
+
+    success = await update_entry_title(entry_id, new_title)
+    if success:
+        # Аудит-каналга хабар
+        asyncio.create_task(notify_edit_to_audit(dept_name, entry_id, new_title))
+        asyncio.create_task(sync_sheets_background())
+
+        await message.answer(
+            f"✅ <b>ҲИСОБОТ НОМИ МУВАФФАҚИЯТЛИ ЯНГИЛАНДИ!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📑 <b>Ҳисобот ID:</b> #{entry_id}\n"
+            f"📝 <b>Янги номи:</b> {new_title}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Барча маълумотлар ва Google Таблица автомат янгиланди.",
+            reply_markup=main_kb(message.from_user.id),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer("❌ Таҳрирлашда хатолик юз берди.", reply_markup=main_kb(message.from_user.id))
 
 
 @dp.callback_query(F.data.startswith("del_entry_"))
@@ -1021,22 +1129,22 @@ async def browse_category_entries(cb: types.CallbackQuery):
         if specialty: details.append(f"├ 🎓 <b>Ихтисослик:</b> {specialty}")
         det_str = ("\n" + "\n".join(details)) if details else ""
 
+        title_str = title.strip() if title and title.strip() and title.strip() != '—' else "⚠️ <i>(Мавзу киритилмаган)</i>"
         card = (
             f"┌ 📑 <b>Ҳисобот #{e['id']}</b>\n"
             f"├ 📂 <b>Кафедра:</b> {dept_name}\n"
-            f"├ 📝 <b>Иш номи:</b> {title}\n"
+            f"├ 📝 <b>Иш номи:</b> {title_str}\n"
             f"├ 👥 <b>Муаллиф:</b> {authors}"
             f"{det_str}\n"
             f"└ 📅 <b>Вақт:</b> {str(e['created_at'])[:16]}"
         )
 
-        # Кнопка «Файлни юклаш» если есть file_id
+        card_kb = InlineKeyboardBuilder()
+        card_kb.button(text="✏️ Номини таҳрирлаш", callback_data=f"edit_title_{e['id']}")
         if e['file_id']:
-            file_kb = InlineKeyboardBuilder()
-            file_kb.button(text="📥 Ҳужжатни юклаб олиш (PDF/Скан)", callback_data=f"getfile_{e['id']}")
-            await cb.message.answer(card, reply_markup=file_kb.as_markup(), parse_mode="HTML")
-        else:
-            await cb.message.answer(card + "\n<i>📝 (Бириктирилган файл йўқ)</i>", parse_mode="HTML")
+            card_kb.button(text="📥 Ҳужжатни юклаб олиш (PDF/Скан)", callback_data=f"getfile_{e['id']}")
+        card_kb.adjust(1)
+        await cb.message.answer(card, reply_markup=card_kb.as_markup(), parse_mode="HTML")
 
     await cb.answer()
 
