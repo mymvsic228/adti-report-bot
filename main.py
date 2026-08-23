@@ -60,45 +60,45 @@ class AddEntry(StatesGroup):
 # Каждый элемент = (state, prompt_text, field_name)
 CATEGORY_EXTRA_STEPS = {
     "scopus_wos": [
-        ("enter_country",       "🌍 <b>Журнал нашр этилган давлат номини</b> киритинг:\n<i>(Масалан: Germany, USA, Eron, Xitoy)</i>"),
-        ("enter_journal",       "📰 <b>Журнал номини</b> киритинг:\n<i>(Масалан: Journal of Nanostructures)</i>"),
-        ("enter_pub_date",      "📅 <b>Нашр йили, сони, бетлари</b>ни киритинг:\n<i>(Масалан: 2026, №2, 66-72 ёки 16.03.2026, 431-437)</i>"),
-        ("enter_url",           "🔗 <b>Мақола ҳавола (URL/DOI)</b>сини киритинг:\n<i>(Масалан: https://doi.org/...)</i>"),
-        ("enter_authors_count", "👥 <b>Муаллифлар сонини</b> киритинг:\n<i>(Масалан: 5)</i>"),
+        ("enter_country",       "🌍 <b>[3/6-қадам] Журнал нашр этилган давлат:</b>\n<i>(Масалан: Germany, USA, Switzerland, China, Iran)</i>"),
+        ("enter_journal",       "📰 <b>[4/6-қадам] Илмий журнал номи:</b>\n<i>(Масалан: Journal of Nanostructures)</i>"),
+        ("enter_pub_date",      "📅 <b>[5/6-қадам] Нашр санаси ва бетлари:</b>\n<i>(Масалан: 16.03.2026, 431-437 ёки Vol. 5, No. 2)</i>"),
+        ("enter_url",           "🔗 <b>[6/6-қадам] Мақола ҳаволаси (DOI / URL):</b>\n<i>(Масалан: https://doi.org/10.1016/...)</i>"),
+        ("enter_authors_count", "👥 <b>Муаллифлар умумий сони:</b>\n<i>(Масалан: 5)</i>"),
     ],
     "oak_ru_if": [
-        ("enter_country",       "🌍 <b>Журнал нашр этилган давлат номини</b> киритинг:\n<i>(Масалан: Russia, Germany)</i>"),
-        ("enter_journal",       "📰 <b>Журнал номини</b> киритинг:"),
-        ("enter_pub_date",      "📅 <b>Нашр йили, сони, бетлари</b>ни киритинг:\n<i>(Масалан: Vol. 6 No. 02 (2026))</i>"),
-        ("enter_url",           "🔗 <b>Мақола ҳавола (URL/DOI)</b>сини киритинг:"),
-        ("enter_authors_count", "👥 <b>Муаллифлар сонини</b> киритинг:"),
+        ("enter_country",       "🌍 <b>[3/6-қадам] Журнал нашр этилган давлат:</b>\n<i>(Масалан: Россия, Германия)</i>"),
+        ("enter_journal",       "📰 <b>[4/6-қадам] Илмий журнал номи:</b>\n<i>(Масалан: Кардиология ва терапия)</i>"),
+        ("enter_pub_date",      "📅 <b>[5/6-қадам] Нашр йили, сони ва бетлари:</b>\n<i>(Масалан: Vol. 6 No. 02 (2026))</i>"),
+        ("enter_url",           "🔗 <b>[6/6-қадам] Мақола интернет ҳаволаси (URL/DOI):</b>"),
+        ("enter_authors_count", "👥 <b>Муаллифлар сони:</b>\n<i>(Масалан: 3)</i>"),
     ],
     "oak_uz": [
-        ("enter_journal",   "📰 <b>Журнал номини</b> киритинг:\n<i>(Масалан: Profilaktik tibbiyot va salomatlik)</i>"),
-        ("enter_pub_date",  "📅 <b>Нашр санаси / йили</b>ни киритинг:\n<i>(Масалан: 05.02.2026 ёки 2026, №1)</i>"),
-        ("enter_url",       "🔗 <b>Мақола ҳавола (URL)</b>сини киритинг:"),
+        ("enter_journal",   "📰 <b>[3/5-қадам] Илмий журнал номи:</b>\n<i>(Масалан: Профилактик тиббиёт ва саломатлик)</i>"),
+        ("enter_pub_date",  "📅 <b>[4/5-қадам] Нашр санаси ёки йили/сони:</b>\n<i>(Масалан: 05.02.2026 ёки 2026, №1)</i>"),
+        ("enter_url",       "🔗 <b>[5/5-қадам] Мақоланинг интернет ҳаволаси (URL):</b>"),
     ],
     "dsc": [
-        ("enter_specialty", "🎓 <b>Ихтисослик шифри ва номи</b>ни киритинг:\n<i>(Масалан: 14.00.06 — Кардиология)</i>"),
-        ("enter_pub_date",  "📅 <b>ВАК томонидан тасдиқланган сана</b>ни киритинг:\n<i>(Масалан: 15.03.2026)</i>"),
+        ("enter_specialty", "🎓 <b>[3/4-қадам] Ихтисослик шифри ва номи:</b>\n<i>(Масалан: 14.00.06 — Кардиология)</i>"),
+        ("enter_pub_date",  "📅 <b>[4/4-қадам] ОАК тасдиқлаган сана:</b>\n<i>(Масалан: 15.03.2026)</i>"),
     ],
     "phd": [
-        ("enter_specialty", "🎓 <b>Ихтисослик шифри ва номи</b>ни киритинг:\n<i>(Масалан: 14.00.06 — Кардиология)</i>"),
-        ("enter_pub_date",  "📅 <b>ВАК томонидан тасдиқланган сана</b>ни киритинг:\n<i>(Масалан: 15.03.2026)</i>"),
+        ("enter_specialty", "🎓 <b>[3/4-қадам] Ихтисослик шифри ва номи:</b>\n<i>(Масалан: 14.00.06 — Кардиология)</i>"),
+        ("enter_pub_date",  "📅 <b>[4/4-қадам] ОАК тасдиқлаган сана:</b>\n<i>(Масалан: 15.03.2026)</i>"),
     ],
     "monography": [
-        ("enter_publisher", "🏢 <b>Нашриёт номини</b> киритинг:\n<i>(Масалан: Fan va texnologiya)</i>"),
-        ("enter_pub_date",  "📅 <b>Нашр йили ва санаси</b>ни киритинг:\n<i>(Масалан: 2026)</i>"),
+        ("enter_publisher", "🏢 <b>[3/4-қадам] Нашриёт номи:</b>\n<i>(Масалан: Fan va texnologiya)</i>"),
+        ("enter_pub_date",  "📅 <b>[4/4-қадам] Нашр йили ва санаси:</b>\n<i>(Масалан: 2026)</i>"),
     ],
     "patent": [
-        ("enter_pub_date",   "📅 <b>Патент берилган сана</b>сини киритинг:\n<i>(Масалан: 23.02.2026)</i>"),
-        ("enter_reg_number", "🔢 <b>Патент рақами</b>ни киритинг:\n<i>(Масалан: IAP 8489 ёки DGU 60217)</i>"),
+        ("enter_pub_date",   "📅 <b>[3/4-қадам] Патент берилган санаси:</b>\n<i>(Масалан: 23.02.2026)</i>"),
+        ("enter_reg_number", "🔢 <b>[4/4-қадам] Патент қайд рақами:</b>\n<i>(Масалан: IAP 8489 ёки DGU 60217)</i>"),
     ],
     "thesis_foreign": [
-        ("enter_venue",    "📍 <b>Ўтказилган жой ва санаси</b>ни киритинг:\n<i>(Масалан: Toshkent, 15.03.2026)</i>"),
+        ("enter_venue",    "📍 <b>[3/3-қадам] Анжуман ўтказилган жой ва сана:</b>\n<i>(Масалан: Москва, 15.04.2026)</i>"),
     ],
     "thesis_uz": [
-        ("enter_venue",    "📍 <b>Ўтказилган жой ва санаси</b>ни киритинг:\n<i>(Масалан: Andijon, 10.04.2026)</i>"),
+        ("enter_venue",    "📍 <b>[3/3-қадам] Анжуман ўтказилган жой ва сана:</b>\n<i>(Масалан: Тошкент, 10.05.2026)</i>"),
     ],
 }
 
@@ -112,24 +112,27 @@ STATE_FIELD_MAP = {
     "enter_specialty":     "specialty",
     "enter_reg_number":    "reg_number",
     "enter_publisher":     "publisher",
-    "enter_venue":         "pub_date",   # место+дата → сохраняем в pub_date
+    "enter_venue":         "pub_date",
 }
 
 
 # ─── KEYBOARDS ──────────────────────────────────────────────────────────────
 def main_kb(user_id: int):
-    buttons = [
-        [KeyboardButton(text="📁 Ҳисобот қўшиш")],
-        [KeyboardButton(text="📋 Юборилган ишлар (Ўчириш)"), KeyboardButton(text="📊 Кафедрам статистикаси")],
-        [KeyboardButton(text="🗂 Файлларни кўриш (категория)")],
-        [KeyboardButton(text="🚪 Кафедрадан чиқиш")],
-    ]
+    """Эргономичная 2-колоночная клавиатура с понятными иконками"""
     if user_id in ADMIN_IDS:
-        buttons.append([KeyboardButton(text="🏛 Сводный ҳисобот")])
-        buttons.append([KeyboardButton(text="📦 Файллар ZIP архиви (.zip)")])
-        buttons.append([KeyboardButton(text="📊 Excel ҳисобот юклаш (.xlsx)")])
-        buttons.append([KeyboardButton(text="📥 Word ҳисобот юклаш")])
-        buttons.append([KeyboardButton(text="🔑 Кафедралар пароллари (Word)")])
+        buttons = [
+            [KeyboardButton(text="➕ Ҳисобот қўшиш")],
+            [KeyboardButton(text="🏛 Сводный ҳисобот"), KeyboardButton(text="📊 Кафедра статистикаси")],
+            [KeyboardButton(text="📊 Excel ҳисобот (.xlsx)"), KeyboardButton(text="📥 Word ҳисобот (.docx)")],
+            [KeyboardButton(text="📦 Файллар ZIP архиви"), KeyboardButton(text="🗂 Файллар базаси")],
+            [KeyboardButton(text="🔑 Кафедралар пароллари"), KeyboardButton(text="🚪 Кафедрадан чиқиш")],
+        ]
+    else:
+        buttons = [
+            [KeyboardButton(text="➕ Ҳисобот қўшиш")],
+            [KeyboardButton(text="📋 Юборилган ишлар"), KeyboardButton(text="📊 Кафедра статистикаси")],
+            [KeyboardButton(text="🗂 Файллар базаси"), KeyboardButton(text="🚪 Кафедрадан чиқиш")],
+        ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 
@@ -228,25 +231,33 @@ async def cmd_start(message: types.Message, state: FSMContext):
 
     if dept:
         await message.answer(
-            f"👋 <b>Ассалому алайкум!</b>\n\n"
-            f"📂 <b>Кафедрангиз:</b>\n<i>{dept['name']}</i>\n"
-            f"👤 Мудир: <b>{dept['head_name'] or '—'}</b>\n\n"
-            f"Қуйидаги тугмалардан фойдаланинг 👇",
+            f"🏛 <b>АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💼 <b>Илмий бўлим ҳисобот тизими — 2026</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📂 <b>Кафедра:</b> {dept['name']}\n"
+            f"👤 <b>Мудир:</b> {dept['head_name'] or '—'}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Керакли бўлимни танланг 👇",
             reply_markup=main_kb(user_id),
             parse_mode="HTML"
         )
     elif user_id in ADMIN_IDS:
         await message.answer(
-            f"👑 <b>Ассалому алайкум, Админ!</b>\n\n"
-            f"Сиз бошқарув панелига кирдингиз. Барча 65 та кафедра ҳисоботларини кўришингиз, "
-            f"Word файлини юклаб олишингиз ва кафедралар паролларини тарқатишингиз мумкин 👇",
+            f"👑 <b>Ассалому алайкум, Ҳурматли Администратор!</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💼 <b>АДТИ Илмий ҳисоботлар бошқарув панели</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Сиз барча 65 та кафедра ҳисоботларини кўришингиз, Excel/Word ва ZIP файлларни юклаб олишингиз ҳамда паролларни бошқаришингиз мумкин.\n\n"
+            f"Керакли амални танланг 👇",
             reply_markup=main_kb(user_id),
             parse_mode="HTML"
         )
     else:
         await message.answer(
-            "🔒 <b>Ассалому алайкум! АДТИ Илмий ҳисоботлар тизими</b>\n\n"
-            "Кафедрангизга кириш учун илмий бўлим томонидан берилган <b>МАХСУС ПАРОЛни (кодни)</b> киритинг:\n\n"
+            "🔒 <b>Ассалому алайкум! АДТИ Илмий бўлим тизими</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Кафедрангизга кириш учун берилган <b>МАХСУС ПАРОЛни (кодни)</b> киритинг:\n\n"
             "<i>(Масалан: ADTI-01-XXXX)</i>",
             reply_markup=ReplyKeyboardRemove(),
             parse_mode="HTML"
@@ -262,8 +273,9 @@ async def process_dept_code(message: types.Message, state: FSMContext):
 
     if not dept:
         await message.answer(
-            "❌ <b>Нотўғри парол!</b>\n\n"
-            "Илтимос, кодни қайта текшириб тўғри киритинг ёки Илмий бўлимга мурожаат қилинг:",
+            "❌ <b>Нотўғри парол!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Илтимос, кодни қайта текшириб тўғри киритинг ёки Илмий бўлимга мурожаат қилинг.",
             parse_mode="HTML"
         )
         return
@@ -273,9 +285,11 @@ async def process_dept_code(message: types.Message, state: FSMContext):
     await state.clear()
 
     await message.answer(
-        f"✅ <b>Кафедра тасдиқланди!</b>\n\n"
-        f"📂 <b>{dept['name']}</b>\n"
-        f"👤 Кафедра мудири: <b>{dept['head_name'] or '—'}</b>\n\n"
+        f"✅ <b>Кафедра тасдиқланди!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 <b>Кафедра:</b> {dept['name']}\n"
+        f"👤 <b>Мудир:</b> {dept['head_name'] or '—'}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Энди ҳисоботларни юборишингиз мумкин 👇",
         reply_markup=main_kb(message.from_user.id),
         parse_mode="HTML"
@@ -283,12 +297,12 @@ async def process_dept_code(message: types.Message, state: FSMContext):
 
 
 # ─── ВЫХОД ИЗ КАФЕДРЫ ───────────────────────────────────────────────────────
-@dp.message(F.text == "🚪 Кафедрадан чиқиш")
+@dp.message(F.text.in_(["🚪 Кафедрадан чиқиш", "🚪 Чиқиш"]))
 async def logout_dept(message: types.Message, state: FSMContext):
     await unbind_user(message.from_user.id)
     await state.clear()
     await message.answer(
-        "🔓 Сиз кафедрадан чиқдингиз.\n\n"
+        "🔓 <b>Сиз кафедрадан чиқдингиз.</b>\n\n"
         "Бошқа кафедрага кириш учун махсус код-паролни киритинг:",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML"
@@ -297,7 +311,7 @@ async def logout_dept(message: types.Message, state: FSMContext):
 
 
 # ─── ДОБАВЛЕНИЕ ЗАПИСИ: ШАГ 1 — КАТЕГОРИЯ ───────────────────────────────────
-@dp.message(F.text == "📁 Ҳисобот қўшиш")
+@dp.message(F.text.in_(["➕ Ҳисобот қўшиш", "📁 Ҳисобот қўшиш"]))
 async def add_report_start(message: types.Message, state: FSMContext):
     dept = await get_dept_by_user(message.from_user.id)
     if not dept and message.from_user.id not in ADMIN_IDS:
@@ -307,7 +321,10 @@ async def add_report_start(message: types.Message, state: FSMContext):
     dept_name = dept['name'] if dept else "Администратор"
     await state.clear()
     await message.answer(
-        f"📂 <b>{dept_name}</b>\n\nКатегорияни танланг:",
+        f"📂 <b>{dept_name}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Қайси йўналиш бўйича ҳисобот киритмоқчисиз?\n"
+        f"Категорияни танланг 👇",
         reply_markup=categories_kb(),
         parse_mode="HTML"
     )
@@ -320,9 +337,10 @@ async def choose_category(cb: types.CallbackQuery, state: FSMContext):
     await state.update_data(category=cat)
     label = INDICATOR_LABELS.get(cat, cat)
     await cb.message.edit_text(
-        f"✅ <b>{label}</b> танланди.\n\n"
-        f"📝 <b>Иш номини</b> киритинг:\n"
-        f"<i>(мақола, монография, патент, диссертация номи)</i>",
+        f"✅ <b>{label}</b> танланди.\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📝 <b>[1/N-қадам] Иш номини киритинг:</b>\n"
+        f"<i>(Мақола, монография, патент ёки диссертация номи)</i>",
         parse_mode="HTML"
     )
     await state.set_state(AddEntry.enter_title)
@@ -334,7 +352,8 @@ async def choose_category(cb: types.CallbackQuery, state: FSMContext):
 async def enter_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
     await message.answer(
-        "👤 <b>Муаллифларни</b> киритинг:\n<i>(Ф.И.Ш., вергул билан)</i>",
+        "👥 <b>[2/N-қадам] Муаллифларнинг Ф.И.Ш.ни киритинг:</b>\n"
+        "<i>(Масалан: Узбекова Нелли Рафиковна, Хужамбердиев М.)</i>",
         parse_mode="HTML"
     )
     await state.set_state(AddEntry.enter_authors)
@@ -536,7 +555,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         "publisher": publisher,
     }))
 
-    # Аудит-канал: добавляем новые поля в уведомление
+    # Аудит-канал: қўшимча майдонлар
     extra_lines = ""
     if country:       extra_lines += f"\n🌍 <b>Давлат:</b> {country}"
     if journal_name:  extra_lines += f"\n📰 <b>Журнал:</b> {journal_name}"
@@ -563,21 +582,25 @@ async def save_entry(message: types.Message, state: FSMContext,
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
     total_cat = summary.get(cat, 0)
+    has_file_str = "📎 Ҳужжат бириктирилди" if file_path or file_id else "📝 Файлсиз сақланди"
 
     await message.answer(
-        f"✅ <b>Қабул қилинди!</b>\n\n"
-        f"📂 <i>{dept_name}</i>\n"
-        f"📌 {label}: <b>{total_cat} та</b>\n"
-        f"{'📎 Файл сақланди.' if file_path else '📝 Файлсиз сақланди.'}\n"
-        f"{'📊 Google Таблицага юборилди.' if SHEET_WEBHOOK_URL else ''}",
+        f"✅ <b>ҲИСОБОТ МУВАФФАҚИЯТЛИ САҚЛАНДИ!</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 <b>Кафедра:</b> {dept_name}\n"
+        f"📌 <b>Категория:</b> {label}\n"
+        f"📝 <b>Иш номи:</b> {title}\n"
+        f"👥 <b>Муаллиф(лар):</b> {authors}\n"
+        f"📄 <b>Ҳолати:</b> {has_file_str}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 Ушбу йўналишдаги жами ишлар: <b>{total_cat} та</b>",
         reply_markup=main_kb(user_id),
         parse_mode="HTML"
     )
 
 
-
 # ─── СТАТИСТИКА КАФЕДРЫ ─────────────────────────────────────────────────────
-@dp.message(F.text == "📊 Кафедрам статистикаси")
+@dp.message(F.text.in_(["📊 Кафедра статистикаси", "📊 Кафедрам статистикаси"]))
 async def my_stats(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     dept = await get_dept_by_user(user_id)
@@ -585,10 +608,11 @@ async def my_stats(message: types.Message, state: FSMContext):
     if not dept:
         if user_id in ADMIN_IDS:
             await message.answer(
-                "👑 <b>Сиз Администраторсиз.</b>\n\n"
-                "Ўз кафедрангиз статистикасини кўриш учун кафедра кодини киритинг:\n"
+                "👑 <b>Сиз Администраторсиз.</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "Ўз кафедрангиз статистикасини кўриш учун аввал кафедра кодини киритинг:\n"
                 "<i>(Масалан: ADTI-02-EE76)</i>\n\n"
-                "Ёки барча кафедраларнинг сводный ҳисоботини кўриш учун:\n"
+                "Ёки институтнинг умумий сводкасини кўриш учун:\n"
                 "👉 <b>🏛 Сводный ҳисобот</b> тугмасини босинг.",
                 reply_markup=ReplyKeyboardRemove(),
                 parse_mode="HTML"
@@ -599,24 +623,30 @@ async def my_stats(message: types.Message, state: FSMContext):
         return
 
     summary = await get_dept_summary(dept['id'])
-    lines = [f"📂 <b>{dept['name']}</b>\n<i>Мудир: {dept['head_name'] or '—'}</i>\n"]
+    lines = [
+        f"📊 <b>КАФЕДРА СТАТИСТИКАСИ</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📂 <b>Кафедра:</b> {dept['name']}\n"
+        f"👤 <b>Мудир:</b> {dept['head_name'] or '—'}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    ]
 
     total = 0
     for key, label in INDICATORS:
         cnt = summary.get(key, 0)
         if cnt:
-            lines.append(f"  {label}: <b>{cnt}</b>")
+            lines.append(f"  • {label}: <b>{cnt} та</b>")
             total += cnt
 
     if total == 0:
-        lines.append("  <i>Ҳали ёзувлар йўқ</i>")
+        lines.append("  <i>Ҳозирча юборилган илмий ишлар йўқ</i>")
 
-    lines.append(f"\n📊 <b>Жами: {total} та ёзув</b>")
+    lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📈 <b>Жами топширилган ишлар: {total} та</b>")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 # ─── ПРОСМОТР И УДАЛЕНИЕ СВОИХ ЗАПИСЕЙ ──────────────────────────────────────
-@dp.message(F.text == "📋 Юборилган ишлар (Ўчириш)")
+@dp.message(F.text.in_(["📋 Юборилган ишлар", "📋 Юборилган ишлар (Ўчириш)"]))
 async def list_dept_submissions(message: types.Message):
     user_id = message.from_user.id
     dept = await get_dept_by_user(user_id)
@@ -627,30 +657,34 @@ async def list_dept_submissions(message: types.Message):
     dept_id = dept['id'] if dept else 1
     dept_name = dept['name'] if dept else "Барча кафедралар"
 
-    entries = await get_dept_entries(dept_id, limit=10)
+    entries = await get_dept_entries(dept_id, limit=15)
     if not entries:
         await message.answer(
-            f"📂 <b>{dept_name}</b>\n\n"
-            f"Ҳозирча юборилган илмий ишлар йўқ.",
+            f"📂 <b>{dept_name}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Ҳозирча юборилган илмий ишлар йўқ 📭",
             parse_mode="HTML"
         )
         return
 
     await message.answer(
         f"📋 <b>{dept_name}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Сўнгги юборилган ишлар рўйхати:\n"
-        f"<i>(Агар хато киритган бўлсангиз, пастдаги 🗑 тугмани босиб ўчиришингиз мумкин)</i>",
+        f"<i>(Агар хато киритган бўлсангиз, 🗑 тугмани босиб ўчиришингиз мумкин)</i>",
         parse_mode="HTML"
     )
 
     for e in entries:
         cat_lbl = INDICATOR_LABELS.get(e['category'], e['category'])
-        has_f = "📎 Файл бор" if e['file_path'] else "📝 Файлсиз"
+        has_f = "📎 Ҳужжат бор" if e['file_path'] or e['file_id'] else "📝 Файлсиз"
         text = (
-            f"🔹 <b>#{e['id']} — {cat_lbl}</b>\n"
-            f"📝 <b>Номи:</b> {e['title'] or '—'}\n"
-            f"👤 <b>Муаллифлар:</b> {e['authors'] or '—'}\n"
-            f"📅 Сана: {str(e['created_at'])[:16]} | {has_f}"
+            f"┌ 📑 <b>Ҳисобот #{e['id']}</b>\n"
+            f"├ 📌 <b>Категория:</b> {cat_lbl}\n"
+            f"├ 📝 <b>Иш номи:</b> {e['title'] or '—'}\n"
+            f"├ 👤 <b>Муаллиф:</b> {e['authors'] or '—'}\n"
+            f"├ 📅 <b>Сана:</b> {str(e['created_at'])[:16]}\n"
+            f"└ 📄 <b>Ҳолати:</b> {has_f}"
         )
         del_kb = InlineKeyboardBuilder()
         del_kb.button(text=f"🗑 Ўчириш (#{e['id']})", callback_data=f"del_entry_{e['id']}")
@@ -722,7 +756,7 @@ def browse_categories_kb():
     return kb.as_markup()
 
 
-@dp.message(F.text == "🗂 Файлларни кўриш (категория)")
+@dp.message(F.text.in_(["🗂 Файллар базаси", "🗂 Файлларни кўриш (категория)"]))
 async def browse_by_category_start(message: types.Message):
     user_id = message.from_user.id
     dept = await get_dept_by_user(user_id)
@@ -732,11 +766,12 @@ async def browse_by_category_start(message: types.Message):
         await message.answer("⚠️ Аввал кафедра кодини киритинг: /start")
         return
 
-    scope = "барча кафедралар бўйича" if is_admin and not dept else f"<b>{dept['name']}</b> кафедраси бўйича"
+    scope = "Барча 65 та кафедра бўйича" if is_admin and not dept else f"{dept['name']} кафедраси бўйича"
     await message.answer(
-        f"🗂 <b>Қайси категорияни кўрмоқчисиз?</b>\n"
-        f"<i>({scope})</i>\n\n"
-        f"Категорияни танланг 👇",
+        f"🗂 <b>ФАЙЛЛАР БАЗАСИ</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔎 <b>Кўриш ҳудуди:</b> {scope}\n\n"
+        f"Қайси бўлимдаги файлларни кўрмоқчисиз? 👇",
         reply_markup=browse_categories_kb(),
         parse_mode="HTML"
     )
@@ -755,11 +790,12 @@ async def browse_category_entries(cb: types.CallbackQuery):
     label = INDICATOR_LABELS.get(cat, cat)
     entries = await get_entries_by_category(cat, dept_id=dept_filter, limit=30)
 
+    scope_title = " (Барча кафедралар)" if not dept_filter else ""
     await cb.message.edit_text(
-        f"📂 <b>{label}</b>\n"
-        f"Топилди: <b>{len(entries)} та</b> ёзув\n"
-        f"{'<i>(Барча кафедралар)</i>' if not dept_filter else ''}\n\n"
-        f"{'Ҳали юборилган ёзув йўқ 📭' if not entries else 'Рўйхат қуйида 👇'}",
+        f"📂 <b>{label}{scope_title}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 Топилган ишлар сони: <b>{len(entries)} та</b>\n\n"
+        f"{'Ҳозирча ушбу бўлимда ёзувлар йўқ 📭' if not entries else 'Рўйхат қуйида келтирилган 👇'}",
         parse_mode="HTML",
         reply_markup=None
     )
@@ -776,28 +812,32 @@ async def browse_category_entries(cb: types.CallbackQuery):
         journal = e['journal_name'] or ''
         reg_num = e['reg_number'] or ''
         specialty = e['specialty'] or ''
+        country = e['country'] or ''
 
-        # Формируем подпись
-        extra = ""
-        if journal:   extra += f"\n📰 {journal}"
-        if pub_date:  extra += f"\n📅 {pub_date}"
-        if reg_num:   extra += f"\n🔢 {reg_num}"
-        if specialty: extra += f"\n🎓 {specialty}"
+        details = []
+        if country:   details.append(f"├ 🌍 <b>Давлат:</b> {country}")
+        if journal:   details.append(f"├ 📰 <b>Журнал:</b> {journal}")
+        if pub_date:  details.append(f"├ 📅 <b>Сана/Бет:</b> {pub_date}")
+        if reg_num:   details.append(f"├ 🔢 <b>Рег. рақам:</b> {reg_num}")
+        if specialty: details.append(f"├ 🎓 <b>Ихтисослик:</b> {specialty}")
+        det_str = ("\n" + "\n".join(details)) if details else ""
 
         card = (
-            f"🔹 <b>#{e['id']}</b> | <i>{dept_name}</i>\n"
-            f"📝 {title[:120]}\n"
-            f"👤 {authors[:80]}"
-            f"{extra}"
+            f"┌ 📑 <b>Ҳисобот #{e['id']}</b>\n"
+            f"├ 📂 <b>Кафедра:</b> {dept_name}\n"
+            f"├ 📝 <b>Иш номи:</b> {title}\n"
+            f"├ 👥 <b>Муаллиф:</b> {authors}"
+            f"{det_str}\n"
+            f"└ 📅 <b>Вақт:</b> {str(e['created_at'])[:16]}"
         )
 
         # Кнопка «Файлни юклаш» если есть file_id
         if e['file_id']:
             file_kb = InlineKeyboardBuilder()
-            file_kb.button(text="📎 Файлни юклаш", callback_data=f"getfile_{e['id']}")
+            file_kb.button(text="📥 Ҳужжатни юклаб олиш (PDF/Скан)", callback_data=f"getfile_{e['id']}")
             await cb.message.answer(card, reply_markup=file_kb.as_markup(), parse_mode="HTML")
         else:
-            await cb.message.answer(card + "\n<i>📝 Файл юкланмаган</i>", parse_mode="HTML")
+            await cb.message.answer(card + "\n<i>📝 (Бириктирилган файл йўқ)</i>", parse_mode="HTML")
 
     await cb.answer()
 
@@ -853,42 +893,56 @@ async def send_entry_file(cb: types.CallbackQuery):
 
 
 # ─── ADMIN: СВОДНАЯ ТАБЛИЦА ─────────────────────────────────────────────────
-@dp.message(F.text == "🏛 Сводный ҳисобот")
+@dp.message(F.text.in_(["🏛 Сводный ҳисобот", "🏛 Сводный ҳисобот (65 кафедра)"]))
 async def admin_summary(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
     rows = await get_all_summary()
-    lines = ["📊 <b>Сводный ҳисобот — барча 65 та кафедра</b>\n"]
-    total_scopus = total_phd = total_dsc = total_all = 0
+    total_scopus = total_phd = total_dsc = total_pat = total_all = 0
+    active_depts = 0
 
+    dept_lines = []
     for r in rows:
-        if r['total'] == 0:
-            continue
-        name_short = r['name'][:32] + '…' if len(r['name']) > 32 else r['name']
-        lines.append(
-            f"<b>{r['id']}.</b> {name_short}\n"
-            f"   DSc:{r['dsc']} PhD:{r['phd']} Scopus:{r['scopus_wos']} "
-            f"Патент:{r['patent']} Жами:<b>{r['total']}</b>\n"
-        )
         total_scopus += r['scopus_wos']
         total_phd += r['phd']
         total_dsc += r['dsc']
+        total_pat += r['patent']
         total_all += r['total']
 
-    lines.append(
-        f"\n<b>═══ ЖАМИ по институту ═══</b>\n"
-        f"DSc: {total_dsc} | PhD: {total_phd} | Scopus: {total_scopus}\n"
-        f"Барча ёзувлар: <b>{total_all} та</b>"
+        if r['total'] > 0:
+            active_depts += 1
+            name_short = r['name'][:32] + '…' if len(r['name']) > 32 else r['name']
+            dept_lines.append(
+                f"<b>{r['id']}. {name_short}</b>\n"
+                f"   └ 🌐 Scopus: <b>{r['scopus_wos']}</b> | 💡 Патент: <b>{r['patent']}</b> | 🎓 DSc/PhD: <b>{r['dsc']}/{r['phd']}</b> | Жами: <b>{r['total']}</b>"
+            )
+
+    header = (
+        f"🏛 <b>АДТИ — БАРЧА 65 ТА КАФЕДРА СВОДКАСИ</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 <b>ИНСТИТУТ БЎЙИЧА УМУМИЙ КЎРСАТКИЧЛАР:</b>\n"
+        f"• 🌐 Scopus / WoS мақолалар: <b>{total_scopus} та</b>\n"
+        f"• 💡 Ихтиро ва патентлар: <b>{total_pat} та</b>\n"
+        f"• 🎓 DSc ҳимоялар: <b>{total_dsc} та</b> | PhD: <b>{total_phd} та</b>\n"
+        f"• 🏢 Иш топширган кафедралар: <b>{active_depts} / 65 та</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📈 <b>ЖАМИ БАРЧА ЁЗУВЛАР: {total_all} та</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📋 <b>Кафедралар кесимида:</b>\n"
     )
 
-    text = "\n".join(lines)
-    for i in range(0, len(text), 4000):
-        await message.answer(text[i:i+4000], parse_mode="HTML")
+    if not dept_lines:
+        text = header + "<i>Ҳозирча бирорта ҳам кафедра иш топширмаган.</i>"
+        await message.answer(text, parse_mode="HTML")
+    else:
+        text = header + "\n".join(dept_lines)
+        for i in range(0, len(text), 4000):
+            await message.answer(text[i:i+4000], parse_mode="HTML")
 
 
 # ─── ADMIN: СКАЧАТЬ ZIP АРХИВ ВСЕХ ФАЙЛОВ ПО ПАПКАМ ──────────────────────
-@dp.message(F.text == "📦 Файллар ZIP архиви (.zip)")
+@dp.message(F.text.in_(["📦 Файллар ZIP архиви", "📦 Файллар ZIP архиви (.zip)"]))
 async def prompt_zip_download(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
@@ -905,9 +959,10 @@ async def prompt_zip_download(message: types.Message):
     kb.row(InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="cancel"))
 
     await message.answer(
-        "📦 <b>Файллар ZIP архивини юклаб олиш</b>\n\n"
+        "📦 <b>Файллар ZIP архивини юклаб олиш</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "Барча юборилган PDF ва тасдиқловчи файллар папкалар (категориялар) бўйича тартибланиб, битта ZIP архив қилиб берилади.\n\n"
-        "Керакли вариантни танланг 👇",
+        "Керакли бўлимни танланг 👇",
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
     )
@@ -958,7 +1013,8 @@ async def process_zip_download(cb: types.CallbackQuery):
         await bot.send_document(
             cb.message.chat.id,
             types.BufferedInputFile(buf.read(), filename=zip_name),
-            caption=f"✅ <b>АДТИ 2026 — Файллар архиви (.zip)</b>\n\n"
+            caption=f"✅ <b>АДТИ 2026 — Файллар архиви (.zip)</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"📌 Бўлим: <b>{label_info}</b>\n"
                     f"📁 Жами архивланган файллар: <b>{file_count} та</b>\n"
                     f"📂 Барча файллар папкаларга чиройли тартибланган!",
@@ -972,12 +1028,12 @@ async def process_zip_download(cb: types.CallbackQuery):
 
 
 # ─── ADMIN: EXCEL ОТЧЁТ ПО ХИСАБОТУ (.xlsx) ──────────────────────────────
-@dp.message(F.text == "📊 Excel ҳисобот юклаш (.xlsx)")
+@dp.message(F.text.in_(["📊 Excel ҳисобот (.xlsx)", "📊 Excel ҳисобот юклаш (.xlsx)"]))
 async def download_excel_report(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer("⏳ Excel ҳисобот яратиляпти (.xlsx)...")
+    await message.answer("⏳ <b>Excel ҳисобот яратилмоқда (.xlsx)...</b>", parse_mode="HTML")
     summary_rows = await get_all_summary()
     detailed_rows = await get_all_detailed_entries()
     buf = await generate_report_excel(summary_rows, detailed_rows)
@@ -985,44 +1041,46 @@ async def download_excel_report(message: types.Message):
     await bot.send_document(
         message.chat.id,
         types.BufferedInputFile(buf.read(), filename="ADTI_2026_hisobot.xlsx"),
-        caption="✅ <b>АДТИ 2026 йил Excel ҳисоботи (.xlsx)</b>\n\n"
+        caption="✅ <b>АДТИ 2026 йил Excel ҳисоботи (.xlsx)</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "📊 <b>1-варақ:</b> 65 та кафедра сводкаси (барча 17 индикатор + жами суммалар)\n"
-                "📝 <b>2-варақ:</b> Барча юборилган илмий ишлар базаси (муаллифлар, номлар)",
+                "📝 <b>2-варақ:</b> Барча юборилган илмий ишлар базаси (давлат, журнал, сана, муаллифлар)",
         parse_mode="HTML"
     )
 
 
 # ─── ADMIN: WORD ОТЧЁТ ПО ХИСАБОТУ ──────────────────────────────────────────
-@dp.message(F.text == "📥 Word ҳисобот юклаш")
+@dp.message(F.text.in_(["📥 Word ҳисобот (.docx)", "📥 Word ҳисобот юклаш"]))
 async def download_report(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer("⏳ Word ҳисобот яратиляпти...")
+    await message.answer("⏳ <b>Word ҳисобот яратилмоқда (.docx)...</b>", parse_mode="HTML")
     rows = await get_all_summary()
     buf = await generate_report_docx(rows)
 
     await bot.send_document(
         message.chat.id,
         types.BufferedInputFile(buf.read(), filename="ADTI_2026_hisobot.docx"),
-        caption="✅ <b>АДТИ 2026 йил ҳисоботи</b> — барча 65 та кафедра",
+        caption="✅ <b>АДТИ 2026 йил Word расмий ҳисоботи</b> — барча 65 та кафедра",
         parse_mode="HTML"
     )
 
 
 # ─── ADMIN: СКАЧАТЬ СПИСОК ПАРОЛЕЙ ВСЕХ 65 КАФЕДР ──────────────────────────
-@dp.message(F.text == "🔑 Кафедралар пароллари (Word)")
+@dp.message(F.text.in_(["🔑 Кафедралар пароллари", "🔑 Кафедралар пароллари (Word)"]))
 async def download_passwords(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer("⏳ Пароллар ҳужжати тайёрланмоқда...")
+    await message.answer("⏳ <b>Пароллар ҳужжати тайёрланмоқда...</b>", parse_mode="HTML")
     buf = await generate_codes_docx(DEPARTMENTS)
 
     await bot.send_document(
         message.chat.id,
         types.BufferedInputFile(buf.read(), filename="ADTI_Kafedralar_Parollari.docx"),
-        caption="🔑 <b>АДТИ: Барча 65 та кафедра учун кириш пароллари (кодлари)</b>\n\n"
+        caption="🔑 <b>АДТИ: Барча 65 та кафедра учун кириш пароллари (кодлари)</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "Ушбу ҳужжатни чиқариб ёки мудирларга тарқатишингиз мумкин. Ҳар бир кафедра фақат ўз пароли орқали киради!",
         parse_mode="HTML"
     )
