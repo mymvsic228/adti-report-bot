@@ -572,7 +572,7 @@ async def save_entry(message: types.Message, state: FSMContext,
 
 # ─── СТАТИСТИКА КАФЕДРЫ ─────────────────────────────────────────────────────
 @dp.message(F.text == "📊 Кафедрам статистикаси")
-async def my_stats(message: types.Message):
+async def my_stats(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     dept = await get_dept_by_user(user_id)
 
@@ -580,12 +580,14 @@ async def my_stats(message: types.Message):
         if user_id in ADMIN_IDS:
             await message.answer(
                 "👑 <b>Сиз Администраторсиз.</b>\n\n"
-                "Ўз кафедрангиз статистикасини кўриш учун аввал кафедра кодини киритинг.\n"
-                "Ёки барча кафедраларнинг сводный ҳисоботини кўриш учун:\n\n"
+                "Ўз кафедрангиз статистикасини кўриш учун кафедра кодини киритинг:\n"
+                "<i>(Масалан: ADTI-02-EE76)</i>\n\n"
+                "Ёки барча кафедраларнинг сводный ҳисоботини кўриш учун:\n"
                 "👉 <b>🏛 Сводный ҳисобот</b> тугмасини босинг.",
-                reply_markup=main_kb(user_id),
+                reply_markup=ReplyKeyboardRemove(),
                 parse_mode="HTML"
             )
+            await state.set_state(AuthState.waiting_for_code)
         else:
             await message.answer("⚠️ Аввал кафедра паролини киритинг: /start")
         return
