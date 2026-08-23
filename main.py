@@ -787,8 +787,6 @@ async def save_entry(message: types.Message, state: FSMContext,
         entry_id=entry_id,
         extra_lines=extra_lines,
     ))
-    reason = f"Таҳрирланди: #{entry_id} ({dept_name})" if is_edit else f"Янги ҳисобот: #{entry_id} ({dept_name})"
-    asyncio.create_task(backup_database_to_channel(reason=reason))
     asyncio.create_task(sync_sheets_background())
 
     summary = await get_dept_summary(dept_id)
