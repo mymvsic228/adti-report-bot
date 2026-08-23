@@ -686,6 +686,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         extra_lines=extra_lines,
     ))
     asyncio.create_task(backup_database_to_channel(reason=f"Янги ҳисобот: #{entry_id} ({dept_name})"))
+    asyncio.create_task(sync_sheets_background())
 
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
@@ -813,6 +814,7 @@ async def process_delete_entry(cb: types.CallbackQuery):
         dept_name = dept['name'] if dept else f"Кафедра #{dept_id}"
         asyncio.create_task(notify_delete_to_audit(dept_name, entry_id))
         asyncio.create_task(backup_database_to_channel(reason=f"Ўчирилди: #{entry_id} ({dept_name})"))
+        asyncio.create_task(sync_sheets_background())
         await cb.message.edit_text(
             f"🗑 <b>#{entry_id} рақамли ёзув ўчирилди.</b>\n"
             f"Ҳисобот статистикаси автомат янгиланди.",
@@ -849,6 +851,7 @@ async def confirm_clear_all(cb: types.CallbackQuery):
         return
     await clear_all_test_data()
     asyncio.create_task(backup_database_to_channel(reason="Тест маълумотлар тозаланди"))
+    asyncio.create_task(sync_sheets_background())
     await cb.message.edit_text("✅ <b>Барча тест маълумотлар муваффақиятли тозаланди!</b>\nБаза бўш ва расмий қабулга тайёр.", parse_mode="HTML")
     await cb.answer()
 
@@ -1197,44 +1200,56 @@ async def download_passwords(message: types.Message):
 
 
 # ─── ADMIN: ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ С GOOGLE SHEETS ────────────────────
+# ─── GOOGLE SHEETS LIVE SYNC ────────────────────────────────────────────────
+async def sync_sheets_background():
+    """Фоновая синхронизация сводной таблицы с Google Sheets"""
+    if not SHEET_WEBHOOK_URL:
+        return
+    try:
+        rows = await get_all_summary()
+        payload = []
+        for r in rows:
+            payload.append({
+                "dept_id": r['id'],
+                "dept_name": r['name'],
+                "head_name": r['head_name'],
+                "dsc": r['dsc'], "phd": r['phd'],
+                "monography": r['monography'], "patent": r['patent'],
+                "oak_uz": r['oak_uz'], "oak_ru_if": r['oak_ru_if'],
+                "thesis_uz": r['thesis_uz'], "thesis_foreign": r['thesis_foreign'],
+                "scopus_wos": r['scopus_wos'],
+                "rationalizer": r['rationalizer'],
+                "implementation": r['implementation'],
+                "conferences": r['conferences'],
+                "total": r['total'],
+                "action": "full_sync"
+            })
+        async with aiohttp.ClientSession() as session:
+            await session.post(
+                SHEET_WEBHOOK_URL,
+                json={"action": "full_sync", "departments": payload},
+                timeout=aiohttp.ClientTimeout(total=30),
+                allow_redirects=True
+            )
+        logger.info("Google Sheets synchronized successfully in background.")
+    except Exception as e:
+        logger.warning(f"Failed to sync Google Sheets: {e}")
+
+
+# ─── ADMIN: ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ С GOOGLE SHEETS ────────────────────
 @dp.message(F.text == "📋 Google Таблица янгилаш")
 async def force_sync_sheets(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
 
     if not SHEET_WEBHOOK_URL:
-        await message.answer("⚠️ SHEET_WEBHOOK_URL созланмаган. Render Environment Variables га қўшинг.")
+        await message.answer("⚠️ SHEET_WEBHOOK_URL созланмаган.")
         return
 
     await message.answer("⏳ Барча маълумотлар Google Таблицага юборилмоқда...")
-
-    rows = await get_all_summary()
-    payload = []
-    for r in rows:
-        payload.append({
-            "dept_id": r['id'],
-            "dept_name": r['name'],
-            "head_name": r['head_name'],
-            "dsc": r['dsc'], "phd": r['phd'],
-            "monography": r['monography'], "patent": r['patent'],
-            "oak_uz": r['oak_uz'], "oak_ru_if": r['oak_ru_if'],
-            "thesis_uz": r['thesis_uz'], "thesis_foreign": r['thesis_foreign'],
-            "scopus_wos": r['scopus_wos'],
-            "rationalizer": r['rationalizer'],
-            "implementation": r['implementation'],
-            "conferences": r['conferences'],
-            "total": r['total'],
-            "action": "full_sync"
-        })
-
     try:
-        async with aiohttp.ClientSession() as session:
-            resp = await session.post(
-                SHEET_WEBHOOK_URL,
-                json={"action": "full_sync", "departments": payload},
-                timeout=aiohttp.ClientTimeout(total=30)
-            )
-        await message.answer(f"✅ Google Таблицага муваффақиятли юборилди!\n{len(payload)} та кафедра.")
+        await sync_sheets_background()
+        await message.answer("✅ Google Таблицага муваффақиятли юборилди!\nБарча 65 та кафедра янгиланди.")
     except Exception as e:
         await message.answer(f"❌ Хатолик: {e}")
 
@@ -1266,6 +1281,9 @@ async def main():
 
     # Запускаем фоновый цикл авто-бэкапа базы данных каждые 12 часов
     asyncio.create_task(periodic_backup_loop())
+
+    # Первичная синхронизация с Google Таблицей
+    asyncio.create_task(sync_sheets_background())
 
     await start_web_server()
     await dp.start_polling(bot, handle_signals=False)

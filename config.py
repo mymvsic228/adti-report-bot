@@ -15,6 +15,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 DB_PATH = BASE_DIR / "adti.db"
 FILES_DIR = BASE_DIR / "uploads"
 FILES_DIR.mkdir(exist_ok=True)
-SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")  # Google Apps Script URL
+DEFAULT_SHEET_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbyYVMSMfClqD-yK5XzzGzk3TG8mf3TUpkcxELuR9fCdn9skMZRgAOP4NPmeimZWoSg/exec"
+SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", DEFAULT_SHEET_WEBHOOK_URL)
 AUDIT_CHANNEL_ID = os.getenv("AUDIT_CHANNEL_ID", "-1004434194693")
 
