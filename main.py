@@ -421,12 +421,22 @@ async def logout_dept(message: types.Message, state: FSMContext):
 @dp.message(F.text.in_(["➕ Ҳисобот қўшиш", "📁 Ҳисобот қўшиш"]))
 async def add_report_start(message: types.Message, state: FSMContext):
     dept = await get_dept_by_user(message.from_user.id)
-    if not dept and message.from_user.id not in ADMIN_IDS:
-        await message.answer("⚠️ Аввал кафедра кодини киритинг: /start")
+    if not dept:
+        await message.answer(
+            "🔒 <b>Ҳисобот киритиш учун аввал кафедра паролини киритинг:</b>\n\n"
+            "<i>(Масалан: ADTI-15-9CE2)</i>",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="HTML"
+        )
+        await state.set_state(AuthState.waiting_for_code)
         return
 
-    dept_name = dept['name'] if dept else "Администратор"
+    dept_id = dept['id']
+    dept_name = dept['name']
+    head_name = dept['head_name'] or ''
+
     await state.clear()
+    await state.update_data(dept_id=dept_id, dept_name=dept_name, head_name=head_name)
     await message.answer(
         f"📂 <b>{dept_name}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -604,10 +614,21 @@ async def save_entry(message: types.Message, state: FSMContext,
         user_id = message.from_user.id
 
     data = await state.get_data()
-    dept = await get_dept_by_user(user_id)
-    dept_id = dept['id'] if dept else 1
-    dept_name = dept['name'] if dept else "Админ"
-    head_name = dept['head_name'] if dept else ""
+    dept_id = data.get('dept_id')
+    dept_name = data.get('dept_name')
+    head_name = data.get('head_name', '')
+
+    if not dept_id:
+        dept = await get_dept_by_user(user_id)
+        if dept:
+            dept_id = dept['id']
+            dept_name = dept['name']
+            head_name = dept['head_name'] or ''
+        else:
+            dept_id = 15
+            dept_name = "Анатомия ва клиник анатомия кафедраси"
+            head_name = "Кахаров Зафар Абдурахмонович"
+
     await state.clear()
 
     cat            = data.get('category', '')

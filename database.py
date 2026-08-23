@@ -317,16 +317,17 @@ async def bind_user_to_dept(tg_user_id: int, dept_id: int, role: str = 'staff'):
     pool = await get_pg_pool()
     if pool:
         async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM dept_users WHERE tg_user_id = $1;", tg_user_id)
             await conn.execute("""
                 INSERT INTO dept_users (tg_user_id, dept_id, role)
-                VALUES ($1, $2, $3)
-                ON CONFLICT (tg_user_id, dept_id) DO UPDATE SET role = EXCLUDED.role;
+                VALUES ($1, $2, $3);
             """, tg_user_id, dept_id, role)
             return
 
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM dept_users WHERE tg_user_id = ?", (tg_user_id,))
         await db.execute(
-            "INSERT OR REPLACE INTO dept_users (tg_user_id, dept_id, role) VALUES (?, ?, ?)",
+            "INSERT INTO dept_users (tg_user_id, dept_id, role) VALUES (?, ?, ?)",
             (tg_user_id, dept_id, role)
         )
         await db.commit()
