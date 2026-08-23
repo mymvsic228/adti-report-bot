@@ -573,9 +573,21 @@ async def save_entry(message: types.Message, state: FSMContext,
 # ─── СТАТИСТИКА КАФЕДРЫ ─────────────────────────────────────────────────────
 @dp.message(F.text == "📊 Кафедрам статистикаси")
 async def my_stats(message: types.Message):
-    dept = await get_dept_by_user(message.from_user.id)
+    user_id = message.from_user.id
+    dept = await get_dept_by_user(user_id)
+
     if not dept:
-        await message.answer("⚠️ Аввал кафедра паролини киритинг: /start")
+        if user_id in ADMIN_IDS:
+            await message.answer(
+                "👑 <b>Сиз Администраторсиз.</b>\n\n"
+                "Ўз кафедрангиз статистикасини кўриш учун аввал кафедра кодини киритинг.\n"
+                "Ёки барча кафедраларнинг сводный ҳисоботини кўриш учун:\n\n"
+                "👉 <b>🏛 Сводный ҳисобот</b> тугмасини босинг.",
+                reply_markup=main_kb(user_id),
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer("⚠️ Аввал кафедра паролини киритинг: /start")
         return
 
     summary = await get_dept_summary(dept['id'])
