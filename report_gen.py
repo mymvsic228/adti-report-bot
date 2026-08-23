@@ -247,7 +247,10 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     from database import INDICATOR_LABELS
     det_headers = [
         "ID", "Сана/Вақт", "Кафедра ID", "Кафедра номи", "Кафедра мудири",
-        "Категория", "Иш номи", "Муаллифлар", "Йил", "Файл борми?"
+        "Категория", "Иш номи / Диссертация мавзуси", "Муаллифлар (Ф.И.Ш.)",
+        "Нашр давлати", "Журнал номи", "Нашр йили / Сана / Бетлар",
+        "URL / DOI", "Муаллифлар сони", "Ихтисослик шифри ва номи",
+        "Рег. рақам (Патент)", "Нашриёт (Монография)", "Файл борми?"
     ]
     ws2.append(det_headers)
     ws2.row_dimensions[1].height = 26
@@ -263,9 +266,19 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
         has_f = "✅ Ҳа" if d['file_path'] else "❌ Йўқ"
         cat_lbl = INDICATOR_LABELS.get(d['category'], d['category'])
         r_data = [
-            d['id'], str(d['created_at']), d['dept_id'], d['dept_name'],
-            d['head_name'] or '', cat_lbl, d['title'] or '',
-            d['authors'] or '', d['year'] or 2026, has_f
+            d['id'], str(d['created_at'])[:16], d['dept_id'], d['dept_name'],
+            d['head_name'] or '', cat_lbl,
+            d['title'] or '',
+            d['authors'] or '',
+            d['country'] if 'country' in d.keys() else '',
+            d['journal_name'] if 'journal_name' in d.keys() else '',
+            d['pub_date'] if 'pub_date' in d.keys() else '',
+            d['url'] if 'url' in d.keys() else '',
+            d['authors_count'] if 'authors_count' in d.keys() else '',
+            d['specialty'] if 'specialty' in d.keys() else '',
+            d['reg_number'] if 'reg_number' in d.keys() else '',
+            d['publisher'] if 'publisher' in d.keys() else '',
+            has_f
         ]
         ws2.append(r_data)
         curr = ws2.max_row
@@ -273,7 +286,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             cell = ws2.cell(row=curr, column=col_idx)
             cell.font = regular_font
             cell.border = thin_border
-            cell.alignment = left_align if col_idx in (4, 7, 8) else center_align
+            cell.alignment = left_align if col_idx in (4, 7, 8, 9, 10, 11, 12, 14) else center_align
 
     # Автоширина колонок
     for ws in (ws1, ws2):
@@ -284,10 +297,16 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
                 val = str(cell.value or '')
                 if len(val) > max_len and '\n' not in val:
                     max_len = len(val)
-            ws.column_dimensions[col_letter].width = min(max(max_len + 3, 10), 45)
+            ws.column_dimensions[col_letter].width = min(max(max_len + 3, 10), 50)
 
     ws1.column_dimensions["B"].width = 38
     ws1.column_dimensions["C"].width = 28
+    ws2.column_dimensions["D"].width = 35
+    ws2.column_dimensions["G"].width = 40
+    ws2.column_dimensions["H"].width = 30
+    ws2.column_dimensions["J"].width = 32
+    ws2.column_dimensions["K"].width = 25
+    ws2.column_dimensions["L"].width = 45
 
     buf = io.BytesIO()
     wb.save(buf)

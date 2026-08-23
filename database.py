@@ -143,6 +143,24 @@ async def init_db():
         """)
         await db.commit()
 
+        # ── Миграция: добавляем новые столбцы если их нет ─────────────────
+        new_columns = [
+            ("country",       "TEXT DEFAULT ''"),   # Страна издания журнала
+            ("journal_name",  "TEXT DEFAULT ''"),   # Название журнала
+            ("pub_date",      "TEXT DEFAULT ''"),   # Год, выпуск, страницы / дата
+            ("url",           "TEXT DEFAULT ''"),   # Ссылка / DOI
+            ("authors_count", "TEXT DEFAULT ''"),   # Количество авторов
+            ("specialty",     "TEXT DEFAULT ''"),   # Шифр и название специальности
+            ("reg_number",    "TEXT DEFAULT ''"),   # Рег. номер (патент)
+            ("publisher",     "TEXT DEFAULT ''"),   # Издательство (монография)
+        ]
+        for col_name, col_def in new_columns:
+            try:
+                await db.execute(f"ALTER TABLE indicators ADD COLUMN {col_name} {col_def}")
+                await db.commit()
+            except Exception:
+                pass  # Колонка уже существует
+
         # Добавляем или обновляем пароли кафедр
         for dep_id, name, head, code in DEPARTMENTS:
             await db.execute("""
@@ -213,12 +231,18 @@ async def unbind_user(tg_user_id: int):
 
 async def add_entry(dept_id: int, category: str, title: str = '', authors: str = '',
                     year: int = 2026, journal: str = '', doi: str = '',
-                    file_path: str = '', file_id: str = '', notes: str = '') -> int:
+                    file_path: str = '', file_id: str = '', notes: str = '',
+                    country: str = '', journal_name: str = '', pub_date: str = '',
+                    url: str = '', authors_count: str = '', specialty: str = '',
+                    reg_number: str = '', publisher: str = '') -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
-            INSERT INTO indicators (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes))
+            INSERT INTO indicators
+                (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
+                 country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
+              country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher))
         await db.commit()
         return cur.lastrowid
 
@@ -267,7 +291,9 @@ async def get_all_detailed_entries() -> list:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
             SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
-                   i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.notes
+                   i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.notes,
+                   i.country, i.journal_name, i.pub_date, i.url,
+                   i.authors_count, i.specialty, i.reg_number, i.publisher
             FROM indicators i
             JOIN departments d ON i.dept_id = d.id
             ORDER BY i.created_at DESC

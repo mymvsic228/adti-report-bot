@@ -40,7 +40,76 @@ class AddEntry(StatesGroup):
     choose_category = State()
     enter_title     = State()
     enter_authors   = State()
-    upload_file     = State()
+    # Расширенные поля (собираются только для нужных категорий)
+    enter_country      = State()   # Страна журнала (Scopus, WoS, хорижий ОАК)
+    enter_journal      = State()   # Название журнала
+    enter_pub_date     = State()   # Год, выпуск, страницы / дата выхода
+    enter_url          = State()   # Ссылка / DOI
+    enter_authors_count = State()  # Количество авторов
+    enter_specialty    = State()   # Шифр и название специальности (дисс., монография)
+    enter_reg_number   = State()   # Рег. номер (патент)
+    enter_publisher    = State()   # Издательство (монография)
+    enter_venue        = State()   # Место и дата проведения (конференция/тезис)
+    upload_file        = State()
+
+# Маппинг категорий → список доп-шагов после enter_authors
+# Каждый элемент = (state, prompt_text, field_name)
+CATEGORY_EXTRA_STEPS = {
+    "scopus_wos": [
+        ("enter_country",       "🌍 <b>Журнал нашр этилган давлат номини</b> киритинг:\n<i>(Масалан: Germany, USA, Eron, Xitoy)</i>"),
+        ("enter_journal",       "📰 <b>Журнал номини</b> киритинг:\n<i>(Масалан: Journal of Nanostructures)</i>"),
+        ("enter_pub_date",      "📅 <b>Нашр йили, сони, бетлари</b>ни киритинг:\n<i>(Масалан: 2026, №2, 66-72 ёки 16.03.2026, 431-437)</i>"),
+        ("enter_url",           "🔗 <b>Мақола ҳавола (URL/DOI)</b>сини киритинг:\n<i>(Масалан: https://doi.org/...)</i>"),
+        ("enter_authors_count", "👥 <b>Муаллифлар сонини</b> киритинг:\n<i>(Масалан: 5)</i>"),
+    ],
+    "oak_ru_if": [
+        ("enter_country",       "🌍 <b>Журнал нашр этилган давлат номини</b> киритинг:\n<i>(Масалан: Russia, Germany)</i>"),
+        ("enter_journal",       "📰 <b>Журнал номини</b> киритинг:"),
+        ("enter_pub_date",      "📅 <b>Нашр йили, сони, бетлари</b>ни киритинг:\n<i>(Масалан: Vol. 6 No. 02 (2026))</i>"),
+        ("enter_url",           "🔗 <b>Мақола ҳавола (URL/DOI)</b>сини киритинг:"),
+        ("enter_authors_count", "👥 <b>Муаллифлар сонини</b> киритинг:"),
+    ],
+    "oak_uz": [
+        ("enter_journal",   "📰 <b>Журнал номини</b> киритинг:\n<i>(Масалан: Profilaktik tibbiyot va salomatlik)</i>"),
+        ("enter_pub_date",  "📅 <b>Нашр санаси / йили</b>ни киритинг:\n<i>(Масалан: 05.02.2026 ёки 2026, №1)</i>"),
+        ("enter_url",       "🔗 <b>Мақола ҳавола (URL)</b>сини киритинг:"),
+    ],
+    "dsc": [
+        ("enter_specialty", "🎓 <b>Ихтисослик шифри ва номи</b>ни киритинг:\n<i>(Масалан: 14.00.06 — Кардиология)</i>"),
+        ("enter_pub_date",  "📅 <b>ВАК томонидан тасдиқланган сана</b>ни киритинг:\n<i>(Масалан: 15.03.2026)</i>"),
+    ],
+    "phd": [
+        ("enter_specialty", "🎓 <b>Ихтисослик шифри ва номи</b>ни киритинг:\n<i>(Масалан: 14.00.06 — Кардиология)</i>"),
+        ("enter_pub_date",  "📅 <b>ВАК томонидан тасдиқланган сана</b>ни киритинг:\n<i>(Масалан: 15.03.2026)</i>"),
+    ],
+    "monography": [
+        ("enter_publisher", "🏢 <b>Нашриёт номини</b> киритинг:\n<i>(Масалан: Fan va texnologiya)</i>"),
+        ("enter_pub_date",  "📅 <b>Нашр йили ва санаси</b>ни киритинг:\n<i>(Масалан: 2026)</i>"),
+    ],
+    "patent": [
+        ("enter_pub_date",   "📅 <b>Патент берилган сана</b>сини киритинг:\n<i>(Масалан: 23.02.2026)</i>"),
+        ("enter_reg_number", "🔢 <b>Патент рақами</b>ни киритинг:\n<i>(Масалан: IAP 8489 ёки DGU 60217)</i>"),
+    ],
+    "thesis_foreign": [
+        ("enter_venue",    "📍 <b>Ўтказилган жой ва санаси</b>ни киритинг:\n<i>(Масалан: Toshkent, 15.03.2026)</i>"),
+    ],
+    "thesis_uz": [
+        ("enter_venue",    "📍 <b>Ўтказилган жой ва санаси</b>ни киритинг:\n<i>(Масалан: Andijon, 10.04.2026)</i>"),
+    ],
+}
+
+# Маппинг state-имени → ключ в FSM data
+STATE_FIELD_MAP = {
+    "enter_country":       "country",
+    "enter_journal":       "journal_name",
+    "enter_pub_date":      "pub_date",
+    "enter_url":           "url",
+    "enter_authors_count": "authors_count",
+    "enter_specialty":     "specialty",
+    "enter_reg_number":    "reg_number",
+    "enter_publisher":     "publisher",
+    "enter_venue":         "pub_date",   # место+дата → сохраняем в pub_date
+}
 
 
 # ─── KEYBOARDS ──────────────────────────────────────────────────────────────
@@ -94,7 +163,8 @@ async def sync_to_sheets(entry: dict):
 # ─── AUDIT CHANNEL NOTIFICATIONS ────────────────────────────────────────────
 async def send_to_audit_channel(dept_id: int, dept_name: str, head_name: str,
                                 category_label: str, title: str, authors: str,
-                                file_path: str, file_id: str, entry_id: int):
+                                file_path: str, file_id: str, entry_id: int,
+                                extra_lines: str = ""):
     """Мгновенно публикует новый отчёт и файл в закрытый канал руководства"""
     if not AUDIT_CHANNEL_ID:
         return
@@ -108,7 +178,8 @@ async def send_to_audit_channel(dept_id: int, dept_name: str, head_name: str,
             f"👤 <b>Мудир:</b> {head_name or '—'}\n"
             f"📌 <b>Категория:</b> {category_label}\n"
             f"📝 <b>Иш номи:</b> {title or '—'}\n"
-            f"👥 <b>Муаллифлар:</b> {authors or '—'}\n"
+            f"👥 <b>Муаллифлар:</b> {authors or '—'}"
+            f"{extra_lines}\n"
             f"📅 <b>Вақт:</b> {now_str}\n"
             f"━━━━━━━━━━━━━━━━━━━━━━"
         )
@@ -263,18 +334,82 @@ async def enter_title(message: types.Message, state: FSMContext):
     await state.set_state(AddEntry.enter_authors)
 
 
+# ─── HELPER: перейти к следующему доп-шагу для категории ────────────────────
+async def go_to_next_extra_step(message: types.Message, state: FSMContext):
+    """Определяет следующий шаг по CATEGORY_EXTRA_STEPS и переходит к нему.
+    Если доп-шагов не осталось — переходит к загрузке файла."""
+    data = await state.get_data()
+    cat = data.get('category', '')
+    steps = CATEGORY_EXTRA_STEPS.get(cat, [])
+    step_index = data.get('extra_step_index', 0)
+
+    if step_index < len(steps):
+        state_name, prompt = steps[step_index]
+        await state.update_data(extra_step_index=step_index + 1)
+        target_state = getattr(AddEntry, state_name)
+        await state.set_state(target_state)
+        await message.answer(prompt, parse_mode="HTML")
+    else:
+        # Все доп-шаги пройдены — запрашиваем файл
+        await message.answer(
+            "📎 <b>Тасдиқловчи ҳужжатни юборинг</b>\n"
+            "<i>(PDF, Word ёки фото скан)</i>\n\n"
+            "Ёки 👇 тугмани босинг:",
+            reply_markup=skip_kb(),
+            parse_mode="HTML"
+        )
+        await state.set_state(AddEntry.upload_file)
+
+
+# ─── УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ДОП-ШАГОВ ────────────────────────────────────
+async def handle_extra_step(message: types.Message, state: FSMContext, field_key: str):
+    """Сохраняет значение текущего доп-шага и переходит к следующему."""
+    await state.update_data(**{field_key: message.text.strip()})
+    await go_to_next_extra_step(message, state)
+
+
+@dp.message(AddEntry.enter_country, F.text)
+async def step_country(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'country')
+
+@dp.message(AddEntry.enter_journal, F.text)
+async def step_journal(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'journal_name')
+
+@dp.message(AddEntry.enter_pub_date, F.text)
+async def step_pub_date(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'pub_date')
+
+@dp.message(AddEntry.enter_url, F.text)
+async def step_url(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'url')
+
+@dp.message(AddEntry.enter_authors_count, F.text)
+async def step_authors_count(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'authors_count')
+
+@dp.message(AddEntry.enter_specialty, F.text)
+async def step_specialty(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'specialty')
+
+@dp.message(AddEntry.enter_reg_number, F.text)
+async def step_reg_number(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'reg_number')
+
+@dp.message(AddEntry.enter_publisher, F.text)
+async def step_publisher(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'publisher')
+
+@dp.message(AddEntry.enter_venue, F.text)
+async def step_venue(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'pub_date')
+
+
 # ─── ШАГ 3 — АВТОРЫ ──────────────────────────────────────────────────────────
 @dp.message(AddEntry.enter_authors, F.text)
 async def enter_authors(message: types.Message, state: FSMContext):
-    await state.update_data(authors=message.text.strip())
-    await message.answer(
-        "📎 <b>Тасдиқловчи ҳужжатни юборинг</b>\n"
-        "<i>(PDF, Word ёки фото скан)</i>\n\n"
-        "Ёки 👇 тугмани босинг:",
-        reply_markup=skip_kb(),
-        parse_mode="HTML"
-    )
-    await state.set_state(AddEntry.upload_file)
+    await state.update_data(authors=message.text.strip(), extra_step_index=0)
+    await go_to_next_extra_step(message, state)
 
 
 # ─── ШАГ 4 — ФАЙЛ (документ) ─────────────────────────────────────────────────
@@ -343,9 +478,17 @@ async def save_entry(message: types.Message, state: FSMContext,
     head_name = dept['head_name'] if dept else ""
     await state.clear()
 
-    cat = data.get('category', '')
-    title = data.get('title', '')
-    authors = data.get('authors', '')
+    cat            = data.get('category', '')
+    title          = data.get('title', '')
+    authors        = data.get('authors', '')
+    country        = data.get('country', '')
+    journal_name   = data.get('journal_name', '')
+    pub_date       = data.get('pub_date', '')
+    url            = data.get('url', '')
+    authors_count  = data.get('authors_count', '')
+    specialty      = data.get('specialty', '')
+    reg_number     = data.get('reg_number', '')
+    publisher      = data.get('publisher', '')
 
     entry_id = await add_entry(
         dept_id=dept_id,
@@ -354,7 +497,15 @@ async def save_entry(message: types.Message, state: FSMContext,
         authors=authors,
         year=2026,
         file_path=file_path,
-        file_id=file_id
+        file_id=file_id,
+        country=country,
+        journal_name=journal_name,
+        pub_date=pub_date,
+        url=url,
+        authors_count=authors_count,
+        specialty=specialty,
+        reg_number=reg_number,
+        publisher=publisher,
     )
 
     asyncio.create_task(sync_to_sheets({
@@ -368,10 +519,28 @@ async def save_entry(message: types.Message, state: FSMContext,
         "year": 2026,
         "has_file": bool(file_path),
         "file_name": Path(file_path).name if file_path else "",
-        "entry_id": entry_id
+        "entry_id": entry_id,
+        "country": country,
+        "journal_name": journal_name,
+        "pub_date": pub_date,
+        "url": url,
+        "authors_count": authors_count,
+        "specialty": specialty,
+        "reg_number": reg_number,
+        "publisher": publisher,
     }))
 
-    # Мгновенная отправка в канал руководства (Live-лента)
+    # Аудит-канал: добавляем новые поля в уведомление
+    extra_lines = ""
+    if country:       extra_lines += f"\n🌍 <b>Давлат:</b> {country}"
+    if journal_name:  extra_lines += f"\n📰 <b>Журнал:</b> {journal_name}"
+    if pub_date:      extra_lines += f"\n📅 <b>Сана/Нашр:</b> {pub_date}"
+    if url:           extra_lines += f"\n🔗 <b>URL:</b> {url}"
+    if specialty:     extra_lines += f"\n🎓 <b>Ихтисослик:</b> {specialty}"
+    if reg_number:    extra_lines += f"\n🔢 <b>Рег. рақам:</b> {reg_number}"
+    if publisher:     extra_lines += f"\n🏢 <b>Нашриёт:</b> {publisher}"
+    if authors_count: extra_lines += f"\n👥 <b>Муаллифлар сони:</b> {authors_count}"
+
     asyncio.create_task(send_to_audit_channel(
         dept_id=dept_id,
         dept_name=dept_name,
@@ -381,9 +550,9 @@ async def save_entry(message: types.Message, state: FSMContext,
         authors=authors,
         file_path=file_path,
         file_id=file_id,
-        entry_id=entry_id
+        entry_id=entry_id,
+        extra_lines=extra_lines,
     ))
-
 
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
@@ -398,6 +567,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         reply_markup=main_kb(user_id),
         parse_mode="HTML"
     )
+
 
 
 # ─── СТАТИСТИКА КАФЕДРЫ ─────────────────────────────────────────────────────
