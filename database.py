@@ -417,6 +417,8 @@ async def get_all_summary() -> list:
                     SUM(CASE WHEN i.category='rationalizer' THEN 1 ELSE 0 END) as rationalizer,
                     SUM(CASE WHEN i.category='implementation' THEN 1 ELSE 0 END) as implementation,
                     SUM(CASE WHEN i.category='conferences' THEN 1 ELSE 0 END) as conferences,
+                    SUM(CASE WHEN i.category='contracts' THEN 1 ELSE 0 END) as contracts,
+                    SUM(CASE WHEN i.category='grants' THEN 1 ELSE 0 END) as grants,
                     COUNT(i.id) as total
                 FROM departments d
                 LEFT JOIN indicators i ON d.id = i.dept_id
@@ -441,6 +443,8 @@ async def get_all_summary() -> list:
                 SUM(CASE WHEN i.category='rationalizer' THEN 1 ELSE 0 END) as rationalizer,
                 SUM(CASE WHEN i.category='implementation' THEN 1 ELSE 0 END) as implementation,
                 SUM(CASE WHEN i.category='conferences' THEN 1 ELSE 0 END) as conferences,
+                SUM(CASE WHEN i.category='contracts' THEN 1 ELSE 0 END) as contracts,
+                SUM(CASE WHEN i.category='grants' THEN 1 ELSE 0 END) as grants,
                 COUNT(i.id) as total
             FROM departments d
             LEFT JOIN indicators i ON d.id = i.dept_id

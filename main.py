@@ -226,28 +226,50 @@ async def notify_delete_to_audit(dept_name: str, entry_id: int):
 
 # ─── DATABASE BACKUP & RESTORE ──────────────────────────────────────────────
 async def backup_database_to_channel(reason: str = "автоматик"):
-    """Журналга/каналга SQLite база бэкапини жўнатади"""
+    """Каналга PostgreSQL маълумотларининг бэкапини жўнатади (CSV формат)"""
     if not AUDIT_CHANNEL_ID:
         return
     try:
-        from config import DB_PATH
-        if not DB_PATH.exists():
-            return
-        with open(DB_PATH, "rb") as f:
-            content = f.read()
+        import datetime, io, csv
+        from database import get_pg_pool, get_all_detailed_entries, DB_PATH
 
-        import datetime
         now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
-        await bot.send_document(
-            AUDIT_CHANNEL_ID,
-            types.BufferedInputFile(content, filename=f"adti_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.db"),
-            caption=f"💾 <b>#DATABASE_BACKUP — АДТИ База бэкапи</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📅 <b>Вақт:</b> {now_str}\n"
-                    f"📌 <b>Ҳолат:</b> {reason}\n"
-                    f"🛡 <i>Барча 65 кафедра маълумотлари хавфсиз сақланди.</i>",
-            parse_mode="HTML"
-        )
+        now_tag = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # PostgreSQL: экспортируем как CSV
+        pool = await get_pg_pool()
+        if pool:
+            rows = await get_all_detailed_entries()
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            if rows:
+                writer.writerow(rows[0].keys())
+                for r in rows:
+                    writer.writerow(r.values())
+            csv_bytes = buf.getvalue().encode("utf-8")
+            await bot.send_document(
+                AUDIT_CHANNEL_ID,
+                types.BufferedInputFile(csv_bytes, filename=f"adti_pg_backup_{now_tag}.csv"),
+                caption=f"💾 <b>#PG_BACKUP — АДТИ PostgreSQL бэкапи</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📅 <b>Вақт:</b> {now_str}\n"
+                        f"📌 <b>Ҳолат:</b> {reason}\n"
+                        f"📊 <b>Жами ёзувлар:</b> {len(rows)} та\n"
+                        f"🛡 <i>Барча 65 кафедра маълумотлари ҳавфсиз сақланди.</i>",
+                parse_mode="HTML"
+            )
+        else:
+            # Fallback: SQLite файл
+            if DB_PATH.exists():
+                with open(DB_PATH, "rb") as f:
+                    content = f.read()
+                await bot.send_document(
+                    AUDIT_CHANNEL_ID,
+                    types.BufferedInputFile(content, filename=f"adti_sqlite_backup_{now_tag}.db"),
+                    caption=f"💾 <b>#SQLITE_BACKUP — АДТИ SQLite бэкапи</b>\n"
+                            f"📅 <b>Вақт:</b> {now_str}\n📌 <b>Ҳолат:</b> {reason}",
+                    parse_mode="HTML"
+                )
         logger.info(f"Database backup sent to channel: reason={reason}")
     except Exception as e:
         logger.warning(f"Failed to send database backup to channel: {e}")
@@ -557,8 +579,13 @@ async def enter_authors(message: types.Message, state: FSMContext):
 # ─── ШАГ 4 — ФАЙЛ (документ) ─────────────────────────────────────────────────
 @dp.message(AddEntry.upload_file, F.document)
 async def receive_doc(message: types.Message, state: FSMContext):
-    dept = await get_dept_by_user(message.from_user.id)
-    dept_id = dept['id'] if dept else 1
+    # Читаем dept_id из FSM state (более надёжно, чем из DB)
+    data = await state.get_data()
+    dept_id = data.get('dept_id')
+    if not dept_id:
+        dept = await get_dept_by_user(message.from_user.id)
+        dept_id = dept['id'] if dept else 0
+
     f = message.document
     file_id = f.file_id
     fname = f.file_name or f"doc_{file_id}.bin"
@@ -575,8 +602,13 @@ async def receive_doc(message: types.Message, state: FSMContext):
 # ─── ШАГ 4 — ФАЙЛ (фото) ─────────────────────────────────────────────────────
 @dp.message(AddEntry.upload_file, F.photo)
 async def receive_photo(message: types.Message, state: FSMContext):
-    dept = await get_dept_by_user(message.from_user.id)
-    dept_id = dept['id'] if dept else 1
+    # Читаем dept_id из FSM state (более надёжно, чем из DB)
+    data = await state.get_data()
+    dept_id = data.get('dept_id')
+    if not dept_id:
+        dept = await get_dept_by_user(message.from_user.id)
+        dept_id = dept['id'] if dept else 0
+
     f = message.photo[-1]
     file_id = f.file_id
     fname = f"photo_{file_id}.jpg"
@@ -780,12 +812,23 @@ async def my_stats(message: types.Message, state: FSMContext):
 async def list_dept_submissions(message: types.Message):
     user_id = message.from_user.id
     dept = await get_dept_by_user(user_id)
-    if not dept and user_id not in ADMIN_IDS:
+    is_admin = user_id in ADMIN_IDS
+
+    if not dept and not is_admin:
         await message.answer("⚠️ Аввал кафедра кодини киритинг: /start")
         return
 
-    dept_id = dept['id'] if dept else 1
-    dept_name = dept['name'] if dept else "Барча кафедралар"
+    if not dept and is_admin:
+        await message.answer(
+            "👑 <b>Администратор учун:</b>\n"
+            "Кафедра ҳисоботларини кўриш учун аввал кафедра кодини киритинг,\n"
+            "ёки <b>🏛 Сводный ҳисобот</b> тугмасини босинг.",
+            parse_mode="HTML"
+        )
+        return
+
+    dept_id = dept['id']
+    dept_name = dept['name']
 
     entries = await get_dept_entries(dept_id, limit=15)
     if not entries:
@@ -984,14 +1027,48 @@ async def send_entry_file(cb: types.CallbackQuery):
     dept = await get_dept_by_user(user_id)
     is_admin = user_id in ADMIN_IDS
 
-    # Проверяем доступ
-    async with __import__('aiosqlite').connect(__import__('config').DB_PATH) as db:
-        db.row_factory = __import__('aiosqlite').Row
-        cur = await db.execute(
-            "SELECT i.file_id, i.dept_id, i.title FROM indicators i WHERE i.id = ?",
-            (entry_id,)
-        )
-        row = await cur.fetchone()
+    # Используем PostgreSQL через database.py
+    from database import get_pg_pool, DB_PATH
+    pool = await get_pg_pool()
+    row = None
+
+    if pool:
+        async with pool.acquire() as conn:
+            r = await conn.fetchrow(
+                "SELECT file_id, dept_id, title FROM indicators WHERE id = $1",
+                entry_id
+            )
+            payload = []
+            if r:
+                payload.append({
+                    "dept_id": r['id'],
+                    "dept_name": r['name'],
+                    "head_name": r['head_name'],
+                    "dsc": r['dsc'], "phd": r['phd'],
+                    "monography": r['monography'], "patent": r['patent'],
+                    "oak_uz": r['oak_uz'], "oak_ru_if": r['oak_ru_if'],
+                    "thesis_uz": r['thesis_uz'], "thesis_foreign": r['thesis_foreign'],
+                    "scopus_wos": r['scopus_wos'],
+                    "rationalizer": r['rationalizer'],
+                    "implementation": r['implementation'],
+                    "conferences": r['conferences'],
+                    "contracts": r.get('contracts', 0) or 0,
+                    "grants": r.get('grants', 0) or 0,
+                    "total": r['total'],
+                    "action": "full_sync"
+                })
+            row = dict(r) if r else None
+    else:
+        import aiosqlite
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cur = await db.execute(
+                "SELECT file_id, dept_id, title FROM indicators WHERE id = ?",
+                (entry_id,)
+            )
+            r = await cur.fetchone()
+            if r:
+                row = dict(r)
 
     if not row:
         await cb.answer("❌ Ёзув топилмади", show_alert=True)
@@ -1014,7 +1091,6 @@ async def send_entry_file(cb: types.CallbackQuery):
             parse_mode="HTML"
         )
     except Exception:
-        # Если не документ — пробуем как фото
         try:
             await bot.send_photo(
                 cb.message.chat.id,
@@ -1242,6 +1318,8 @@ async def sync_sheets_background():
                 "rationalizer": r['rationalizer'],
                 "implementation": r['implementation'],
                 "conferences": r['conferences'],
+                "contracts": r.get('contracts', 0) or 0,
+                "grants": r.get('grants', 0) or 0,
                 "total": r['total'],
                 "action": "full_sync"
             })
