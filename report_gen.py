@@ -314,3 +314,82 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     return buf
 
 
+CATEGORY_FOLDERS = {
+    "scopus_wos":       "01_Scopus_va_Web_of_Science",
+    "dsc":              "02_DSc_Dissertatsiyalar",
+    "phd":              "03_PhD_Dissertatsiyalar",
+    "patent":           "04_Patentlar_IAP_FAP",
+    "monography":       "05_Monografiyalar",
+    "oak_uz":           "06_OzOAK_maqolalari",
+    "oak_ru_if":        "07_Rossiya_va_Xorijiy_OAK",
+    "thesis_uz":        "08_Respublika_konferensiya_tezislari",
+    "thesis_foreign":   "09_Xorijiy_konferensiya_tezislari",
+    "rationalizer":     "10_Ratsionalizatorlik_takliflari",
+    "implementation":   "11_Amaliyotga_tadbiq_qilingan_ishlar",
+    "conferences":      "12_Kafedra_otkazgan_anjumanlar",
+    "contracts":        "13_Xojalik_shartnomalari",
+    "grants":           "14_Grantlar",
+}
+
+
+def sanitize_filename(text: str, max_len: int = 50) -> str:
+    """Очищает строку от недопустимых символов для имен файлов"""
+    import re
+    if not text:
+        return "hujjat"
+    clean = re.sub(r'[\\/*?:"<>|\n\r\t]', '_', str(text))
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    return clean[:max_len]
+
+
+async def generate_files_zip(bot, entries: list) -> tuple[io.BytesIO, int]:
+    """
+    Скачивает файлы из Telegram и упаковывает их в ZIP-архив,
+    разложенный по папкам категорий и кафедр.
+    Возвращает (io.BytesIO, count_files).
+    """
+    import zipfile
+    from pathlib import Path
+
+    buf = io.BytesIO()
+    count = 0
+
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for e in entries:
+            file_id = e['file_id']
+            if not file_id:
+                continue
+
+            try:
+                # Скачиваем файл из серверов Telegram
+                tg_file = await bot.get_file(file_id)
+                f_stream = await bot.download_file(tg_file.file_path)
+                
+                if hasattr(f_stream, 'read'):
+                    content = f_stream.read()
+                elif hasattr(f_stream, 'getvalue'):
+                    content = f_stream.getvalue()
+                else:
+                    content = bytes(f_stream)
+
+                ext = Path(tg_file.file_path).suffix or ".pdf"
+                if not ext.startswith("."):
+                    ext = "." + ext
+
+                cat_folder = CATEGORY_FOLDERS.get(e['category'], e['category'])
+                dept_id = e['dept_id']
+                author = sanitize_filename(e['authors'], 25)
+                title = sanitize_filename(e['title'], 35)
+
+                # Пример имени: 01_Scopus_va_Web_of_Science/[Kaf_02]_Uzbekova_Digital_therapeutics_id12.pdf
+                zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{e['id']}{ext}"
+                zf.writestr(zip_path, content)
+                count += 1
+            except Exception as ex:
+                print(f"Failed to fetch file for entry #{e['id']}: {ex}")
+                continue
+
+    buf.seek(0)
+    return buf, count
+
+

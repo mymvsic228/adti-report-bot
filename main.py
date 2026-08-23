@@ -21,10 +21,13 @@ from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
     get_all_detailed_entries, get_dept_entries, delete_entry, clear_all_test_data,
-    get_entries_by_category,
+    get_entries_by_category, get_files_for_zip,
     DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
-from report_gen import generate_report_docx, generate_codes_docx, generate_report_excel
+from report_gen import (
+    generate_report_docx, generate_codes_docx, generate_report_excel,
+    generate_files_zip
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -123,6 +126,7 @@ def main_kb(user_id: int):
     ]
     if user_id in ADMIN_IDS:
         buttons.append([KeyboardButton(text="🏛 Сводный ҳисобот")])
+        buttons.append([KeyboardButton(text="📦 Файллар ZIP архиви (.zip)")])
         buttons.append([KeyboardButton(text="📊 Excel ҳисобот юклаш (.xlsx)")])
         buttons.append([KeyboardButton(text="📥 Word ҳисобот юклаш")])
         buttons.append([KeyboardButton(text="🔑 Кафедралар пароллари (Word)")])
@@ -881,6 +885,90 @@ async def admin_summary(message: types.Message):
     text = "\n".join(lines)
     for i in range(0, len(text), 4000):
         await message.answer(text[i:i+4000], parse_mode="HTML")
+
+
+# ─── ADMIN: СКАЧАТЬ ZIP АРХИВ ВСЕХ ФАЙЛОВ ПО ПАПКАМ ──────────────────────
+@dp.message(F.text == "📦 Файллар ZIP архиви (.zip)")
+async def prompt_zip_download(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📦 БАРЧА ФАЙЛЛАР (1 та умумий ZIP)", callback_data="zip_all")
+    kb.button(text="🌐 Scopus & WoS (.zip)", callback_data="zip_cat_scopus_wos")
+    kb.button(text="💡 Патентлар (.zip)", callback_data="zip_cat_patent")
+    kb.button(text="🎓 DSc / PhD диссертациялар (.zip)", callback_data="zip_cat_dissertations")
+    kb.button(text="📗 Монографиялар (.zip)", callback_data="zip_cat_monography")
+    kb.button(text="📄 ЎзОАК мақолалари (.zip)", callback_data="zip_cat_oak_uz")
+    kb.button(text="📄 Россия / Халқаро ОАК (.zip)", callback_data="zip_cat_oak_ru_if")
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="cancel"))
+
+    await message.answer(
+        "📦 <b>Файллар ZIP архивини юклаб олиш</b>\n\n"
+        "Барча юборилган PDF ва тасдиқловчи файллар папкалар (категориялар) бўйича тартибланиб, битта ZIP архив қилиб берилади.\n\n"
+        "Керакли вариантни танланг 👇",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+
+
+@dp.callback_query(F.data.startswith("zip_"))
+async def process_zip_download(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("Рухсат йўқ", show_alert=True)
+        return
+
+    zip_type = cb.data.replace("zip_", "")
+    await cb.message.edit_text("⏳ <b>Файллар Telegram серверидан юкланиб, ZIP архив яратилмоқда...</b>\n<i>Файллар сонига қараб 5-20 сония вақт олиши мумкин. Илтимос, кутинг.</i>", parse_mode="HTML")
+
+    entries = []
+    zip_name = "ADTI_2026_Fayllar_Arxiv.zip"
+    label_info = "Барча категориялар"
+
+    if zip_type == "all":
+        entries = await get_files_for_zip()
+        zip_name = "ADTI_2026_Barcha_Fayllar.zip"
+        label_info = "Барча категориялар"
+    elif zip_type == "cat_dissertations":
+        dsc_entries = await get_files_for_zip(category="dsc")
+        phd_entries = await get_files_for_zip(category="phd")
+        entries = dsc_entries + phd_entries
+        zip_name = "ADTI_2026_Dissertatsiyalar_DSc_PhD.zip"
+        label_info = "DSc ва PhD диссертациялари"
+    elif zip_type.startswith("cat_"):
+        cat_key = zip_type[4:]
+        entries = await get_files_for_zip(category=cat_key)
+        label_info = INDICATOR_LABELS.get(cat_key, cat_key)
+        zip_name = f"ADTI_2026_{cat_key}.zip"
+
+    if not entries:
+        await cb.message.edit_text(f"📭 <b>Ушбу бўлимда ҳали бирорта файл бириктирилмаган.</b>\n<i>({label_info})</i>", parse_mode="HTML")
+        await cb.answer()
+        return
+
+    try:
+        buf, file_count = await generate_files_zip(bot, entries)
+
+        if file_count == 0:
+            await cb.message.edit_text("📭 Файлларни юклаб бўлмади ёки улар бўш.", parse_mode="HTML")
+            await cb.answer()
+            return
+
+        await bot.send_document(
+            cb.message.chat.id,
+            types.BufferedInputFile(buf.read(), filename=zip_name),
+            caption=f"✅ <b>АДТИ 2026 — Файллар архиви (.zip)</b>\n\n"
+                    f"📌 Бўлим: <b>{label_info}</b>\n"
+                    f"📁 Жами архивланган файллар: <b>{file_count} та</b>\n"
+                    f"📂 Барча файллар папкаларга чиройли тартибланган!",
+            parse_mode="HTML"
+        )
+        await cb.message.delete()
+    except Exception as e:
+        await cb.message.edit_text(f"❌ ZIP архив яратишда хатолик: {e}", parse_mode="HTML")
+
+    await cb.answer()
 
 
 # ─── ADMIN: EXCEL ОТЧЁТ ПО ХИСАБОТУ (.xlsx) ──────────────────────────────

@@ -291,13 +291,36 @@ async def get_all_detailed_entries() -> list:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
             SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
-                   i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.notes,
+                   i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.file_id, i.notes,
                    i.country, i.journal_name, i.pub_date, i.url,
                    i.authors_count, i.specialty, i.reg_number, i.publisher
             FROM indicators i
             JOIN departments d ON i.dept_id = d.id
             ORDER BY i.created_at DESC
         """)
+        return await cur.fetchall()
+
+
+async def get_files_for_zip(category: str = None, dept_id: int = None) -> list:
+    """Возвращает все записи, у которых прикреплён файл (file_id не пустой)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = """
+            SELECT i.id, i.dept_id, d.name as dept_name, i.category,
+                   i.title, i.authors, i.file_id, i.file_path, i.created_at
+            FROM indicators i
+            JOIN departments d ON i.dept_id = d.id
+            WHERE (i.file_id IS NOT NULL AND i.file_id != '')
+        """
+        params = []
+        if category:
+            query += " AND i.category = ?"
+            params.append(category)
+        if dept_id:
+            query += " AND i.dept_id = ?"
+            params.append(dept_id)
+        query += " ORDER BY i.category, i.dept_id, i.id"
+        cur = await db.execute(query, tuple(params))
         return await cur.fetchall()
 
 
