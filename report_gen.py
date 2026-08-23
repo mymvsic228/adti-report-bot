@@ -208,7 +208,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             r['thesis_uz'] or 0, r['thesis_foreign'] or 0,
             r['scopus_wos'] or 0,
             r['rationalizer'] or 0, r['implementation'] or 0,
-            r['conferences'] or 0, 0, 0,
+            r['conferences'] or 0, r.get('contracts', 0) or 0, r.get('grants', 0) or 0,
             r['total'] or 0
         ]
         ws1.append(row_vals)
@@ -248,7 +248,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     det_headers = [
         "ID", "Сана/Вақт", "Кафедра ID", "Кафедра номи", "Кафедра мудири",
         "Категория", "Иш номи / Диссертация мавзуси", "Муаллифлар (Ф.И.Ш.)",
-        "Нашр давлати", "Журнал номи", "Нашр йили / Сана / Бетлар",
+        "Шартнома/Грант суммаси (млн)", "Нашр давлати", "Журнал/Буюртмачи", "Нашр йили / Сана / Бетлар",
         "URL / DOI", "Муаллифлар сони", "Ихтисослик шифри ва номи",
         "Рег. рақам (Патент)", "Нашриёт (Монография)", "Файл борми?"
     ]
@@ -270,14 +270,15 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             d['head_name'] or '', cat_lbl,
             d['title'] or '',
             d['authors'] or '',
-            d['country'] if 'country' in d.keys() else '',
-            d['journal_name'] if 'journal_name' in d.keys() else '',
-            d['pub_date'] if 'pub_date' in d.keys() else '',
-            d['url'] if 'url' in d.keys() else '',
-            d['authors_count'] if 'authors_count' in d.keys() else '',
-            d['specialty'] if 'specialty' in d.keys() else '',
-            d['reg_number'] if 'reg_number' in d.keys() else '',
-            d['publisher'] if 'publisher' in d.keys() else '',
+            d.get('amount', '') or '',
+            d.get('country', '') or '',
+            d.get('journal_name', '') or '',
+            d.get('pub_date', '') or '',
+            d.get('url', '') or '',
+            d.get('authors_count', '') or '',
+            d.get('specialty', '') or '',
+            d.get('reg_number', '') or '',
+            d.get('publisher', '') or '',
             has_f
         ]
         ws2.append(r_data)
@@ -286,7 +287,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             cell = ws2.cell(row=curr, column=col_idx)
             cell.font = regular_font
             cell.border = thin_border
-            cell.alignment = left_align if col_idx in (4, 7, 8, 9, 10, 11, 12, 14) else center_align
+            cell.alignment = left_align if col_idx in (4, 7, 8, 9, 10, 11, 12, 13, 15) else center_align
 
     # Автоширина колонок
     for ws in (ws1, ws2):

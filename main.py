@@ -48,16 +48,17 @@ class AddEntry(StatesGroup):
     enter_title     = State()
     enter_authors   = State()
     # Расширенные поля (собираются только для нужных категорий)
-    enter_country      = State()   # Страна журнала (Scopus, WoS, хорижий ОАК)
-    enter_journal      = State()   # Название журнала
-    enter_pub_date     = State()   # Год, выпуск, страницы / дата выхода
-    enter_url          = State()   # Ссылка / DOI
-    enter_authors_count = State()  # Количество авторов
-    enter_specialty    = State()   # Шифр и название специальности (дисс., монография)
-    enter_reg_number   = State()   # Рег. номер (патент)
-    enter_publisher    = State()   # Издательство (монография)
-    enter_venue        = State()   # Место и дата проведения (конференция/тезис)
-    upload_file        = State()
+    enter_country       = State()   # Страна журнала (Scopus, WoS, хорижий ОАК)
+    enter_journal       = State()   # Название журнала / Буюртмачи ташкилот
+    enter_pub_date      = State()   # Год, выпуск, страницы / дата выхода / шартнома рақами
+    enter_url           = State()   # Ссылка / DOI
+    enter_authors_count = State()   # Количество авторов
+    enter_specialty     = State()   # Шифр и название специальности (дисс., монография)
+    enter_reg_number    = State()   # Рег. номер (патент)
+    enter_publisher     = State()   # Издательство (монография)
+    enter_venue         = State()   # Место и дата проведения (конференция/тезис)
+    enter_amount        = State()   # Шартнома / Грант суммаси (млн сўмда)
+    upload_file         = State()
 
 # Маппинг категорий → список доп-шагов после enter_authors
 # Каждый элемент = (state, prompt_text, field_name)
@@ -103,6 +104,16 @@ CATEGORY_EXTRA_STEPS = {
     "thesis_uz": [
         ("enter_venue",    "📍 <b>[3/3-қадам] Анжуман ўтказилган жой ва сана:</b>\n<i>(Масалан: Тошкент, 10.05.2026)</i>"),
     ],
+    "contracts": [
+        ("enter_amount",   "💰 <b>[3/5-қадам] Шартнома суммаси (млн сўмда):</b>\n<i>(Масалан: 25 ёки 50.5)</i>"),
+        ("enter_journal",  "🏢 <b>[4/5-қадам] Буюртмачи корхона / ташкилот номи:</b>\n<i>(Масалан: «Андижон биофарм» МЧЖ)</i>"),
+        ("enter_pub_date", "📅 <b>[5/5-қадам] Шартнома рақами ва санаси:</b>\n<i>(Масалан: №14/2026, 10.03.2026)</i>"),
+    ],
+    "grants": [
+        ("enter_amount",   "💰 <b>[3/5-қадам] Грант суммаси (млн сўм ёки валютада):</b>\n<i>(Масалан: 180 млн сўм ёки 25,000 USD)</i>"),
+        ("enter_journal",  "🏢 <b>[4/5-қадам] Молиялаштирувчи фонд / ташкилот:</b>\n<i>(Масалан: Инновацион ривожланиш агентлиги)</i>"),
+        ("enter_pub_date", "📅 <b>[5/5-қадам] Лойиҳа муддати ва санаси:</b>\n<i>(Масалан: 2026-2027 йй.)</i>"),
+    ],
 }
 
 # Маппинг state-имени → ключ в FSM data
@@ -116,6 +127,7 @@ STATE_FIELD_MAP = {
     "enter_reg_number":    "reg_number",
     "enter_publisher":     "publisher",
     "enter_venue":         "pub_date",
+    "enter_amount":        "amount",
 }
 
 
@@ -568,6 +580,10 @@ async def step_publisher(msg: types.Message, state: FSMContext):
 async def step_venue(msg: types.Message, state: FSMContext):
     await handle_extra_step(msg, state, 'pub_date')
 
+@dp.message(AddEntry.enter_amount, F.text)
+async def step_amount(msg: types.Message, state: FSMContext):
+    await handle_extra_step(msg, state, 'amount')
+
 
 # ─── ШАГ 3 — АВТОРЫ ──────────────────────────────────────────────────────────
 @dp.message(AddEntry.enter_authors, F.text)
@@ -674,6 +690,7 @@ async def save_entry(message: types.Message, state: FSMContext,
     specialty      = data.get('specialty', '')
     reg_number     = data.get('reg_number', '')
     publisher      = data.get('publisher', '')
+    amount         = data.get('amount', '')
 
     entry_id = await add_entry(
         dept_id=dept_id,
@@ -691,6 +708,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         specialty=specialty,
         reg_number=reg_number,
         publisher=publisher,
+        amount=amount,
     )
 
     asyncio.create_task(sync_to_sheets({
@@ -713,17 +731,19 @@ async def save_entry(message: types.Message, state: FSMContext,
         "specialty": specialty,
         "reg_number": reg_number,
         "publisher": publisher,
+        "amount": amount,
     }))
 
     # Аудит-канал: қўшимча майдонлар
     extra_lines = ""
     if country:       extra_lines += f"\n🌍 <b>Давлат:</b> {country}"
-    if journal_name:  extra_lines += f"\n📰 <b>Журнал:</b> {journal_name}"
+    if journal_name:  extra_lines += f"\n📰 <b>Журнал/Буюртмачи:</b> {journal_name}"
     if pub_date:      extra_lines += f"\n📅 <b>Сана/Нашр:</b> {pub_date}"
     if url:           extra_lines += f"\n🔗 <b>URL:</b> {url}"
     if specialty:     extra_lines += f"\n🎓 <b>Ихтисослик:</b> {specialty}"
     if reg_number:    extra_lines += f"\n🔢 <b>Рег. рақам:</b> {reg_number}"
     if publisher:     extra_lines += f"\n🏢 <b>Нашриёт:</b> {publisher}"
+    if amount:        extra_lines += f"\n💰 <b>Суммаси:</b> {amount} млн сўм"
     if authors_count: extra_lines += f"\n👥 <b>Муаллифлар сони:</b> {authors_count}"
 
     asyncio.create_task(send_to_audit_channel(
@@ -990,10 +1010,12 @@ async def browse_category_entries(cb: types.CallbackQuery):
         reg_num = e['reg_number'] or ''
         specialty = e['specialty'] or ''
         country = e['country'] or ''
+        amount = e.get('amount') or ''
 
         details = []
         if country:   details.append(f"├ 🌍 <b>Давлат:</b> {country}")
-        if journal:   details.append(f"├ 📰 <b>Журнал:</b> {journal}")
+        if journal:   details.append(f"├ 📰 <b>Журнал/Буюртмачи:</b> {journal}")
+        if amount:    details.append(f"├ 💰 <b>Суммаси:</b> {amount} млн сўм")
         if pub_date:  details.append(f"├ 📅 <b>Сана/Бет:</b> {pub_date}")
         if reg_num:   details.append(f"├ 🔢 <b>Рег. рақам:</b> {reg_num}")
         if specialty: details.append(f"├ 🎓 <b>Ихтисослик:</b> {specialty}")

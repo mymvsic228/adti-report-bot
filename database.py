@@ -156,7 +156,8 @@ async def init_db():
                     authors_count TEXT DEFAULT '',
                     specialty TEXT DEFAULT '',
                     reg_number TEXT DEFAULT '',
-                    publisher TEXT DEFAULT ''
+                    publisher TEXT DEFAULT '',
+                    amount TEXT DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS dept_users (
                     tg_user_id BIGINT NOT NULL,
@@ -165,6 +166,7 @@ async def init_db():
                     PRIMARY KEY (tg_user_id, dept_id)
                 );
             """)
+            await conn.execute("ALTER TABLE indicators ADD COLUMN IF NOT EXISTS amount TEXT DEFAULT '';")
             for dep_id, name, head, code in DEPARTMENTS:
                 await conn.execute("""
                     INSERT INTO departments (id, name, head_name, access_code)
@@ -224,6 +226,7 @@ async def init_db():
             ("specialty",     "TEXT DEFAULT ''"),
             ("reg_number",    "TEXT DEFAULT ''"),
             ("publisher",     "TEXT DEFAULT ''"),
+            ("amount",        "TEXT DEFAULT ''"),
         ]
         for col_name, col_def in new_columns:
             try:
@@ -350,29 +353,29 @@ async def add_entry(dept_id: int, category: str, title: str = '', authors: str =
                     file_path: str = '', file_id: str = '', notes: str = '',
                     country: str = '', journal_name: str = '', pub_date: str = '',
                     url: str = '', authors_count: str = '', specialty: str = '',
-                    reg_number: str = '', publisher: str = '') -> int:
+                    reg_number: str = '', publisher: str = '', amount: str = '') -> int:
     pool = await get_pg_pool()
     if pool:
         async with pool.acquire() as conn:
             row = await conn.fetchrow("""
                 INSERT INTO indicators
                     (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
-                     country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher)
+                     country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher, amount)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                        $11, $12, $13, $14, $15, $16, $17, $18)
+                        $11, $12, $13, $14, $15, $16, $17, $18, $19)
                 RETURNING id;
             """, dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
-                  country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher)
+                  country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher, amount)
             return row['id']
 
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("""
             INSERT INTO indicators
                 (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
-                 country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher, amount)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (dept_id, category, title, authors, year, journal, doi, file_path, file_id, notes,
-              country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher))
+              country, journal_name, pub_date, url, authors_count, specialty, reg_number, publisher, amount))
         await db.commit()
         return cur.lastrowid
 
@@ -463,7 +466,7 @@ async def get_all_detailed_entries() -> list:
                 SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
                        i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.file_id, i.notes,
                        i.country, i.journal_name, i.pub_date, i.url,
-                       i.authors_count, i.specialty, i.reg_number, i.publisher
+                       i.authors_count, i.specialty, i.reg_number, i.publisher, i.amount
                 FROM indicators i
                 JOIN departments d ON i.dept_id = d.id
                 ORDER BY i.created_at DESC
@@ -476,7 +479,7 @@ async def get_all_detailed_entries() -> list:
             SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
                    i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.file_id, i.notes,
                    i.country, i.journal_name, i.pub_date, i.url,
-                   i.authors_count, i.specialty, i.reg_number, i.publisher
+                   i.authors_count, i.specialty, i.reg_number, i.publisher, i.amount
             FROM indicators i
             JOIN departments d ON i.dept_id = d.id
             ORDER BY i.created_at DESC
@@ -561,7 +564,7 @@ async def get_entries_by_category(category: str, dept_id: int = None, limit: int
                 rows = await conn.fetch("""
                     SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
                            i.pub_date, i.journal_name, i.country, i.url,
-                           i.specialty, i.reg_number, i.publisher, i.authors_count,
+                           i.specialty, i.reg_number, i.publisher, i.authors_count, i.amount,
                            d.name as dept_name
                     FROM indicators i
                     JOIN departments d ON i.dept_id = d.id
@@ -573,7 +576,7 @@ async def get_entries_by_category(category: str, dept_id: int = None, limit: int
                 rows = await conn.fetch("""
                     SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
                            i.pub_date, i.journal_name, i.country, i.url,
-                           i.specialty, i.reg_number, i.publisher, i.authors_count,
+                           i.specialty, i.reg_number, i.publisher, i.authors_count, i.amount,
                            d.name as dept_name
                     FROM indicators i
                     JOIN departments d ON i.dept_id = d.id
@@ -589,7 +592,7 @@ async def get_entries_by_category(category: str, dept_id: int = None, limit: int
             cur = await db.execute("""
                 SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
                        i.pub_date, i.journal_name, i.country, i.url,
-                       i.specialty, i.reg_number, i.publisher, i.authors_count,
+                       i.specialty, i.reg_number, i.publisher, i.authors_count, i.amount,
                        d.name as dept_name
                 FROM indicators i
                 JOIN departments d ON i.dept_id = d.id
@@ -601,7 +604,7 @@ async def get_entries_by_category(category: str, dept_id: int = None, limit: int
             cur = await db.execute("""
                 SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
                        i.pub_date, i.journal_name, i.country, i.url,
-                       i.specialty, i.reg_number, i.publisher, i.authors_count,
+                       i.specialty, i.reg_number, i.publisher, i.authors_count, i.amount,
                        d.name as dept_name
                 FROM indicators i
                 JOIN departments d ON i.dept_id = d.id
