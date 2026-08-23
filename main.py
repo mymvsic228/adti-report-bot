@@ -21,6 +21,7 @@ from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
     get_all_detailed_entries, get_dept_entries, delete_entry, clear_all_test_data,
+    get_entries_by_category,
     DEPARTMENTS, INDICATORS, INDICATOR_LABELS
 )
 from report_gen import generate_report_docx, generate_codes_docx, generate_report_excel
@@ -117,6 +118,7 @@ def main_kb(user_id: int):
     buttons = [
         [KeyboardButton(text="📁 Ҳисобот қўшиш")],
         [KeyboardButton(text="📋 Юборилган ишлар (Ўчириш)"), KeyboardButton(text="📊 Кафедрам статистикаси")],
+        [KeyboardButton(text="🗂 Файлларни кўриш (категория)")],
         [KeyboardButton(text="🚪 Кафедрадан чиқиш")],
     ]
     if user_id in ADMIN_IDS:
@@ -701,6 +703,149 @@ async def confirm_clear_all(cb: types.CallbackQuery):
     await clear_all_test_data()
     await cb.message.edit_text("✅ <b>Барча тест маълумотлар муваффақиятли тозаланди!</b>\nБаза бўш ва расмий қабулга тайёр.", parse_mode="HTML")
     await cb.answer()
+
+
+
+# ─── ПРОСМОТР ФАЙЛОВ ПО КАТЕГОРИЯМ ─────────────────────────────────────────
+
+def browse_categories_kb():
+    """Инлайн-клавиатура выбора категории для просмотра файлов"""
+    kb = InlineKeyboardBuilder()
+    for key, label in INDICATORS:
+        kb.button(text=label, callback_data=f"browse_{key}")
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(text="❌ Ёпиш", callback_data="cancel"))
+    return kb.as_markup()
+
+
+@dp.message(F.text == "🗂 Файлларни кўриш (категория)")
+async def browse_by_category_start(message: types.Message):
+    user_id = message.from_user.id
+    dept = await get_dept_by_user(user_id)
+    is_admin = user_id in ADMIN_IDS
+
+    if not dept and not is_admin:
+        await message.answer("⚠️ Аввал кафедра кодини киритинг: /start")
+        return
+
+    scope = "барча кафедралар бўйича" if is_admin and not dept else f"<b>{dept['name']}</b> кафедраси бўйича"
+    await message.answer(
+        f"🗂 <b>Қайси категорияни кўрмоқчисиз?</b>\n"
+        f"<i>({scope})</i>\n\n"
+        f"Категорияни танланг 👇",
+        reply_markup=browse_categories_kb(),
+        parse_mode="HTML"
+    )
+
+
+@dp.callback_query(F.data.startswith("browse_"))
+async def browse_category_entries(cb: types.CallbackQuery):
+    cat = cb.data[7:]
+    user_id = cb.from_user.id
+    dept = await get_dept_by_user(user_id)
+    is_admin = user_id in ADMIN_IDS
+
+    # Админ без кафедры видит всё; остальные — только свою
+    dept_filter = None if (is_admin and not dept) else (dept['id'] if dept else None)
+
+    label = INDICATOR_LABELS.get(cat, cat)
+    entries = await get_entries_by_category(cat, dept_id=dept_filter, limit=30)
+
+    await cb.message.edit_text(
+        f"📂 <b>{label}</b>\n"
+        f"Топилди: <b>{len(entries)} та</b> ёзув\n"
+        f"{'<i>(Барча кафедралар)</i>' if not dept_filter else ''}\n\n"
+        f"{'Ҳали юборилган ёзув йўқ 📭' if not entries else 'Рўйхат қуйида 👇'}",
+        parse_mode="HTML",
+        reply_markup=None
+    )
+
+    if not entries:
+        await cb.answer()
+        return
+
+    for e in entries:
+        title = e['title'] or '—'
+        authors = e['authors'] or '—'
+        dept_name = e['dept_name'] or '—'
+        pub_date = e['pub_date'] or ''
+        journal = e['journal_name'] or ''
+        reg_num = e['reg_number'] or ''
+        specialty = e['specialty'] or ''
+
+        # Формируем подпись
+        extra = ""
+        if journal:   extra += f"\n📰 {journal}"
+        if pub_date:  extra += f"\n📅 {pub_date}"
+        if reg_num:   extra += f"\n🔢 {reg_num}"
+        if specialty: extra += f"\n🎓 {specialty}"
+
+        card = (
+            f"🔹 <b>#{e['id']}</b> | <i>{dept_name}</i>\n"
+            f"📝 {title[:120]}\n"
+            f"👤 {authors[:80]}"
+            f"{extra}"
+        )
+
+        # Кнопка «Файлни юклаш» если есть file_id
+        if e['file_id']:
+            file_kb = InlineKeyboardBuilder()
+            file_kb.button(text="📎 Файлни юклаш", callback_data=f"getfile_{e['id']}")
+            await cb.message.answer(card, reply_markup=file_kb.as_markup(), parse_mode="HTML")
+        else:
+            await cb.message.answer(card + "\n<i>📝 Файл юкланмаган</i>", parse_mode="HTML")
+
+    await cb.answer()
+
+
+@dp.callback_query(F.data.startswith("getfile_"))
+async def send_entry_file(cb: types.CallbackQuery):
+    """Отправляет файл по file_id из Telegram"""
+    entry_id = int(cb.data.replace("getfile_", ""))
+    user_id = cb.from_user.id
+    dept = await get_dept_by_user(user_id)
+    is_admin = user_id in ADMIN_IDS
+
+    # Проверяем доступ
+    async with __import__('aiosqlite').connect(__import__('config').DB_PATH) as db:
+        db.row_factory = __import__('aiosqlite').Row
+        cur = await db.execute(
+            "SELECT i.file_id, i.dept_id, i.title FROM indicators i WHERE i.id = ?",
+            (entry_id,)
+        )
+        row = await cur.fetchone()
+
+    if not row:
+        await cb.answer("❌ Ёзув топилмади", show_alert=True)
+        return
+
+    if not is_admin and dept and row['dept_id'] != dept['id']:
+        await cb.answer("❌ Бу файлга кириш рухсати йўқ", show_alert=True)
+        return
+
+    if not row['file_id']:
+        await cb.answer("❌ Файл сақланмаган", show_alert=True)
+        return
+
+    try:
+        await cb.answer("⏳ Файл юборилмоқда...")
+        await bot.send_document(
+            cb.message.chat.id,
+            row['file_id'],
+            caption=f"📎 <b>{row['title'] or 'Ҳужжат'}</b>\n<i>ID: #{entry_id}</i>",
+            parse_mode="HTML"
+        )
+    except Exception:
+        # Если не документ — пробуем как фото
+        try:
+            await bot.send_photo(
+                cb.message.chat.id,
+                row['file_id'],
+                caption=f"📎 <b>{row['title'] or 'Скан'}</b>\n<i>ID: #{entry_id}</i>",
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            await cb.message.answer(f"❌ Файлни юборишда хатолик: {e}")
 
 
 # ─── ADMIN: СВОДНАЯ ТАБЛИЦА ─────────────────────────────────────────────────

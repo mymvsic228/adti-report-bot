@@ -314,6 +314,38 @@ async def get_dept_entries(dept_id: int, limit: int = 15) -> list:
         return await cur.fetchall()
 
 
+async def get_entries_by_category(category: str, dept_id: int = None, limit: int = 30) -> list:
+    """Возвращает записи по категории. Если dept_id задан — только по кафедре."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if dept_id:
+            cur = await db.execute("""
+                SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
+                       i.pub_date, i.journal_name, i.country, i.url,
+                       i.specialty, i.reg_number, i.publisher, i.authors_count,
+                       d.name as dept_name
+                FROM indicators i
+                JOIN departments d ON i.dept_id = d.id
+                WHERE i.category = ? AND i.dept_id = ?
+                ORDER BY i.created_at DESC
+                LIMIT ?
+            """, (category, dept_id, limit))
+        else:
+            cur = await db.execute("""
+                SELECT i.id, i.created_at, i.title, i.authors, i.file_id, i.file_path,
+                       i.pub_date, i.journal_name, i.country, i.url,
+                       i.specialty, i.reg_number, i.publisher, i.authors_count,
+                       d.name as dept_name
+                FROM indicators i
+                JOIN departments d ON i.dept_id = d.id
+                WHERE i.category = ?
+                ORDER BY i.created_at DESC
+                LIMIT ?
+            """, (category, limit))
+        return await cur.fetchall()
+
+
+
 async def delete_entry(entry_id: int, dept_id: int = None) -> bool:
     """Удаляет ошибочно добавленную запись"""
     async with aiosqlite.connect(DB_PATH) as db:
