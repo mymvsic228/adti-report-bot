@@ -954,6 +954,9 @@ async def start_edit_entry_full(cb: types.CallbackQuery, state: FSMContext):
     )
     await state.set_state(AddEntry.enter_title)
 
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Бекор қилиш", callback_data="cancel")
+
     await cb.message.answer(
         f"✏️ <b>#{entry_id}-РАҚАМЛИ ҲИСОБОТНИ ТАҲРИРЛАШ</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -964,6 +967,7 @@ async def start_edit_entry_full(cb: types.CallbackQuery, state: FSMContext):
         f"⬇️ Барча майдонларни қайта киритинг. Файлни ҳам алмаштириш мумкин.\n\n"
         f"📝 <b>[1/N-қадам] Иш номини (мавзусини) киритинг:</b>\n"
         f"<i>(Ёки аввалгисини: {current_title})</i>",
+        reply_markup=cancel_kb.as_markup(),
         parse_mode="HTML"
     )
     await cb.answer()
