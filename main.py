@@ -1301,6 +1301,8 @@ async def process_zip_download(cb: types.CallbackQuery):
         await cb.answer()
         return
 
+    MAX_SIZE = 45 * 1024 * 1024  # 45 MB — Telegram лимити 50 МБ, запас 5 МБ
+
     try:
         buf, file_count = await generate_files_zip(bot, entries)
 
@@ -1309,17 +1311,63 @@ async def process_zip_download(cb: types.CallbackQuery):
             await cb.answer()
             return
 
-        await bot.send_document(
-            cb.message.chat.id,
-            types.BufferedInputFile(buf.read(), filename=zip_name),
-            caption=f"✅ <b>АДТИ 2026 — Файллар архиви (.zip)</b>\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📌 Бўлим: <b>{label_info}</b>\n"
-                    f"📁 Жами архивланган файллар: <b>{file_count} та</b>\n"
-                    f"📂 Барча файллар папкаларга чиройли тартибланган!",
-            parse_mode="HTML"
-        )
-        await cb.message.delete()
+        zip_size = buf.getbuffer().nbytes
+
+        if zip_size <= MAX_SIZE:
+            # ── Обычная отправка — влезает в лимит ──
+            await bot.send_document(
+                cb.message.chat.id,
+                types.BufferedInputFile(buf.getvalue(), filename=zip_name),
+                caption=f"✅ <b>АДТИ 2026 — Файллар архиви (.zip)</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📌 Бўлим: <b>{label_info}</b>\n"
+                        f"📁 Жами архивланган файллар: <b>{file_count} та</b>\n"
+                        f"📂 Барча файллар папкаларга чиройли тартибланган!",
+                parse_mode="HTML"
+            )
+            await cb.message.delete()
+        else:
+            # ── ZIP слишком большой — автоматически делим по группам кафедр ──
+            # Группы: 1-20, 21-40, 41-65
+            dept_groups = [(1, 20), (21, 40), (41, 65)]
+            await cb.message.edit_text(
+                f"⚠️ <b>ZIP архив жуда катта ({zip_size // (1024*1024)} МБ).</b>\n"
+                f"Кафедралар гуруҳлари бўйича <b>{len(dept_groups)} та</b> алоҳида архивга бўлиб юборилади...\n"
+                f"<i>Илтимос, кутинг.</i>",
+                parse_mode="HTML"
+            )
+
+            sent_parts = 0
+            for start_dept, end_dept in dept_groups:
+                part_entries = [e for e in entries if start_dept <= e['dept_id'] <= end_dept]
+                if not part_entries:
+                    continue
+
+                part_buf, part_count = await generate_files_zip(bot, part_entries)
+                if part_count == 0:
+                    continue
+
+                part_name = f"ADTI_2026_{zip_name.replace('.zip', '')}_Kaf{start_dept:02d}-{end_dept:02d}.zip"
+                sent_parts += 1
+                await bot.send_document(
+                    cb.message.chat.id,
+                    types.BufferedInputFile(part_buf.getvalue(), filename=part_name),
+                    caption=f"📦 <b>{label_info}</b>\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🏫 Кафедралар: <b>{start_dept}–{end_dept}</b>\n"
+                            f"📁 Файллар: <b>{part_count} та</b>",
+                    parse_mode="HTML"
+                )
+
+            if sent_parts == 0:
+                await cb.message.edit_text("📭 Файлларни юклаб бўлмади.", parse_mode="HTML")
+            else:
+                await cb.message.edit_text(
+                    f"✅ <b>Барча файллар {sent_parts} та қисмга бўлиниб юборилди!</b>\n"
+                    f"📌 Бўлим: <b>{label_info}</b>",
+                    parse_mode="HTML"
+                )
+
     except Exception as e:
         await cb.message.edit_text(f"❌ ZIP архив яратишда хатолик: {e}", parse_mode="HTML")
 
