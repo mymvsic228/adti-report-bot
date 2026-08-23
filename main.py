@@ -1038,25 +1038,6 @@ async def send_entry_file(cb: types.CallbackQuery):
                 "SELECT file_id, dept_id, title FROM indicators WHERE id = $1",
                 entry_id
             )
-            payload = []
-            if r:
-                payload.append({
-                    "dept_id": r['id'],
-                    "dept_name": r['name'],
-                    "head_name": r['head_name'],
-                    "dsc": r['dsc'], "phd": r['phd'],
-                    "monography": r['monography'], "patent": r['patent'],
-                    "oak_uz": r['oak_uz'], "oak_ru_if": r['oak_ru_if'],
-                    "thesis_uz": r['thesis_uz'], "thesis_foreign": r['thesis_foreign'],
-                    "scopus_wos": r['scopus_wos'],
-                    "rationalizer": r['rationalizer'],
-                    "implementation": r['implementation'],
-                    "conferences": r['conferences'],
-                    "contracts": r.get('contracts', 0) or 0,
-                    "grants": r.get('grants', 0) or 0,
-                    "total": r['total'],
-                    "action": "full_sync"
-                })
             row = dict(r) if r else None
     else:
         import aiosqlite
