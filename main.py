@@ -1250,20 +1250,17 @@ async def prompt_zip_download(message: types.Message):
         return
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="📦 БАРЧА ФАЙЛЛАР (1 та умумий ZIP)", callback_data="zip_all")
-    kb.button(text="🌐 Scopus & WoS (.zip)", callback_data="zip_cat_scopus_wos")
-    kb.button(text="💡 Патентлар (.zip)", callback_data="zip_cat_patent")
-    kb.button(text="🎓 DSc / PhD диссертациялар (.zip)", callback_data="zip_cat_dissertations")
-    kb.button(text="📗 Монографиялар (.zip)", callback_data="zip_cat_monography")
-    kb.button(text="📄 ЎзОАК мақолалари (.zip)", callback_data="zip_cat_oak_uz")
-    kb.button(text="📄 Россия / Халқаро ОАК (.zip)", callback_data="zip_cat_oak_ru_if")
+    # Добавляем каждую категорию из INDICATORS как отдельный ZIP
+    for key, label in INDICATORS:
+        kb.button(text=f"{label} (.zip)", callback_data=f"zip_cat_{key}")
     kb.adjust(1)
     kb.row(InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="cancel"))
 
     await message.answer(
         "📦 <b>Файллар ZIP архивини юклаб олиш</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "Барча юборилган PDF ва тасдиқловчи файллар папкалар (категориялар) бўйича тартибланиб, битта ZIP архив қилиб берилади.\n\n"
+        "⚠️ <i>Telegram 50 MB лимити сабабли барча файллар бирлаштирилмайди.</i>\n"
+        "Ҳар бир категория алоҳида ZIP архив сифатида юкланади.\n\n"
         "Керакли бўлимни танланг 👇",
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
