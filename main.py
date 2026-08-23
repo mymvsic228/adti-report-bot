@@ -40,6 +40,9 @@ dp = Dispatcher(storage=MemoryStorage())
 class AuthState(StatesGroup):
     waiting_for_code = State()
 
+class RestoreState(StatesGroup):
+    waiting_for_db_file = State()
+
 class AddEntry(StatesGroup):
     choose_category = State()
     enter_title     = State()
@@ -219,6 +222,110 @@ async def notify_delete_to_audit(dept_name: str, entry_id: int):
         await bot.send_message(AUDIT_CHANNEL_ID, text, parse_mode="HTML")
     except Exception as e:
         logger.warning(f"Failed to notify delete to channel: {e}")
+
+
+# ─── DATABASE BACKUP & RESTORE ──────────────────────────────────────────────
+async def backup_database_to_channel(reason: str = "автоматик"):
+    """Журналга/каналга SQLite база бэкапини жўнатади"""
+    if not AUDIT_CHANNEL_ID:
+        return
+    try:
+        from config import DB_PATH
+        if not DB_PATH.exists():
+            return
+        with open(DB_PATH, "rb") as f:
+            content = f.read()
+
+        import datetime
+        now_str = datetime.datetime.now().strftime("%d.%m.%Y %H:%M")
+        await bot.send_document(
+            AUDIT_CHANNEL_ID,
+            types.BufferedInputFile(content, filename=f"adti_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.db"),
+            caption=f"💾 <b>#DATABASE_BACKUP — АДТИ База бэкапи</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📅 <b>Вақт:</b> {now_str}\n"
+                    f"📌 <b>Ҳолат:</b> {reason}\n"
+                    f"🛡 <i>Барча 65 кафедра маълумотлари хавфсиз сақланди.</i>",
+            parse_mode="HTML"
+        )
+        logger.info(f"Database backup sent to channel: reason={reason}")
+    except Exception as e:
+        logger.warning(f"Failed to send database backup to channel: {e}")
+
+
+async def periodic_backup_loop():
+    """Каждые 12 часов автоматически отправляет резервную копию базы в канал"""
+    while True:
+        await asyncio.sleep(43200)  # 12 часов
+        await backup_database_to_channel(reason="12 соатлик режали бэкап")
+
+
+# ─── ADMIN: СКАЧАТЬ БЭКАП БАЗЫ ДАННЫХ ───────────────────────────────────────
+@dp.message(Command("backup_db"))
+async def cmd_backup_db(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    from config import DB_PATH
+    if not DB_PATH.exists():
+        await message.answer("❌ База файли топилмади.")
+        return
+    with open(DB_PATH, "rb") as f:
+        content = f.read()
+    import datetime
+    now_str = datetime.datetime.now().strftime("%Y_%m_%d_%H%M")
+    await bot.send_document(
+        message.chat.id,
+        types.BufferedInputFile(content, filename=f"adti_database_{now_str}.db"),
+        caption="💾 <b>АДТИ: SQLite тўлиқ база файли (.db)</b>\n\n"
+                "Ушбу файлда барча 65 та кафедранинг барча ҳисоботлари, пароллари ва маълумотлари мавжуд.",
+        parse_mode="HTML"
+    )
+
+
+# ─── ADMIN: ВОССТАНОВИТЬ БАЗУ ДАННЫХ ────────────────────────────────────────
+@dp.message(Command("restore_db"))
+async def cmd_restore_db_start(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    await message.answer(
+        "⚠️ <b>ДИҚҚАТ: Базани қайта тиклаш (Restore)!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Илтимос, тикламоқчи бўлган <b>.db</b> файлингизни юборинг (документ сифатида).\n\n"
+        "Ёки бекор қилиш учун /cancel деб ёзинг.",
+        parse_mode="HTML"
+    )
+    await state.set_state(RestoreState.waiting_for_db_file)
+
+
+@dp.message(RestoreState.waiting_for_db_file, F.document)
+async def process_restore_db(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    doc = message.document
+    if not doc.file_name.endswith(".db"):
+        await message.answer("❌ Фақат <b>.db</b> кенгайтмали файл юборинг!", parse_mode="HTML")
+        return
+
+    try:
+        from config import DB_PATH
+        tg_file = await bot.get_file(doc.file_id)
+        f_stream = await bot.download_file(tg_file.file_path)
+        content = f_stream.read() if hasattr(f_stream, 'read') else f_stream.getvalue()
+
+        # Создаем временную копию старой базы
+        if DB_PATH.exists():
+            import shutil
+            shutil.copyfile(DB_PATH, str(DB_PATH) + ".bak")
+
+        # Записываем новую базу
+        with open(DB_PATH, "wb") as f:
+            f.write(content)
+
+        await init_db()
+        await state.clear()
+        await message.answer("✅ <b>База муваффақиятли қайта тикланди!</b>\nБарча маълумотлар янгиланди.", parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"❌ Базани тиклашда хатолик: {e}")
 
 
 
@@ -578,6 +685,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         entry_id=entry_id,
         extra_lines=extra_lines,
     ))
+    asyncio.create_task(backup_database_to_channel(reason=f"Янги ҳисобот: #{entry_id} ({dept_name})"))
 
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
@@ -704,6 +812,7 @@ async def process_delete_entry(cb: types.CallbackQuery):
     if success:
         dept_name = dept['name'] if dept else f"Кафедра #{dept_id}"
         asyncio.create_task(notify_delete_to_audit(dept_name, entry_id))
+        asyncio.create_task(backup_database_to_channel(reason=f"Ўчирилди: #{entry_id} ({dept_name})"))
         await cb.message.edit_text(
             f"🗑 <b>#{entry_id} рақамли ёзув ўчирилди.</b>\n"
             f"Ҳисобот статистикаси автомат янгиланди.",
@@ -739,6 +848,7 @@ async def confirm_clear_all(cb: types.CallbackQuery):
         await cb.answer("Рухсат йўқ", show_alert=True)
         return
     await clear_all_test_data()
+    asyncio.create_task(backup_database_to_channel(reason="Тест маълумотлар тозаланди"))
     await cb.message.edit_text("✅ <b>Барча тест маълумотлар муваффақиятли тозаланди!</b>\nБаза бўш ва расмий қабулга тайёр.", parse_mode="HTML")
     await cb.answer()
 
@@ -1153,6 +1263,9 @@ async def start_web_server():
 async def main():
     await init_db()
     logger.info("ADTI Bot v2.1 started. Polling...")
+
+    # Запускаем фоновый цикл авто-бэкапа базы данных каждые 12 часов
+    asyncio.create_task(periodic_backup_loop())
 
     await start_web_server()
     await dp.start_polling(bot, handle_signals=False)
