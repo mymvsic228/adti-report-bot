@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL, AUDIT_CHANNEL_ID
+from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL, AUDIT_CHANNEL_ID, ADMIN_MASTER_PIN
 from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
@@ -39,6 +39,9 @@ dp = Dispatcher(storage=MemoryStorage())
 # ─── FSM STATES ─────────────────────────────────────────────────────────────
 class AuthState(StatesGroup):
     waiting_for_code = State()
+
+class AdminPinState(StatesGroup):
+    waiting_for_pin = State()
 
 class RestoreState(StatesGroup):
     waiting_for_db_file = State()
@@ -1412,23 +1415,100 @@ async def download_report(message: types.Message):
     )
 
 
-# ─── ADMIN: СКАЧАТЬ СПИСОК ПАРОЛЕЙ ВСЕХ 65 КАФЕДР ──────────────────────────
+# ─── ADMIN: СКАЧАТЬ СПИСОК ПАРОЛЕЙ ВСЕХ 65 КАФЕДР (ЗАЩИЩЕНО MASTER PIN) ─────
 @dp.message(F.text.in_(["🔑 Кафедралар пароллари", "🔑 Кафедралар пароллари (Word)"]))
-async def download_passwords(message: types.Message):
+async def prompt_admin_pin_for_passwords(message: types.Message, state: FSMContext):
     if message.from_user.id not in ADMIN_IDS:
         return
 
-    await message.answer("⏳ <b>Пароллар ҳужжати тайёрланмоқда...</b>", parse_mode="HTML")
-    buf = await generate_codes_docx(DEPARTMENTS)
+    await state.clear()
+    await state.set_state(AdminPinState.waiting_for_pin)
+    await state.update_data(target_action="download_passwords")
 
-    await bot.send_document(
-        message.chat.id,
-        types.BufferedInputFile(buf.read(), filename="ADTI_Kafedralar_Parollari.docx"),
-        caption="🔑 <b>АДТИ: Барча 65 та кафедра учун кириш пароллари (кодлари)</b>\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "Ушбу ҳужжатни чиқариб ёки мудирларга тарқатишингиз мумкин. Ҳар бир кафедра фақат ўз пароли орқали киради!",
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Бекор қилиш", callback_data="cancel")
+
+    await message.answer(
+        "🔒 <b>ХАВФСИЗЛИК ТЕКШИРУВИ (2FA Master PIN)</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "Барча 65 та кафедранинг махсус кириш пароллари ҳужжатини олиш учун <b>Мастер ПИН-кодни</b> киритинг:\n\n"
+        "<i>(ПИН-кодни қуйида ёзиб юборинг)</i>",
+        reply_markup=cancel_kb.as_markup(),
         parse_mode="HTML"
     )
+
+
+@dp.message(AdminPinState.waiting_for_pin, F.text)
+async def process_admin_pin(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        await state.clear()
+        return
+
+    entered_pin = message.text.strip()
+    data = await state.get_data()
+    action = data.get("target_action", "download_passwords")
+    await state.clear()
+
+    import datetime
+    now_str = datetime.datetime.now().strftime("%d.%m.%Y | %H:%M")
+    admin_name = message.from_user.full_name or f"Admin #{message.from_user.id}"
+
+    if entered_pin != ADMIN_MASTER_PIN:
+        # Уведомляем аудит-канал о попытке несанкционированного доступа
+        if AUDIT_CHANNEL_ID:
+            try:
+                alert_text = (
+                    f"🚨 <b>#SECURITY_ALERT — НОТЎҒРИ PIN-КОД ТЕРИЛДИ!</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 <b>Фойдаланувчи:</b> {admin_name} (ID: <code>{message.from_user.id}</code>)\n"
+                    f"⚠️ <b>Ҳаракат:</b> Кафедралар паролларини очишга уриниш\n"
+                    f"❌ <b>Терилган код:</b> <code>{entered_pin}</code>\n"
+                    f"📅 <b>Вақт:</b> {now_str}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🛡 <i>Тизим маълумотлар берилишини тўхтатди.</i>"
+                )
+                await bot.send_message(AUDIT_CHANNEL_ID, alert_text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"Failed to send security alert: {e}")
+
+        await message.answer(
+            "❌ <b>ХАТО ПИН-КОД!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Кириш пароллари ҳужжати очилмади.\n"
+            "Ушбу хавфсизлик ҳодисаси тўғрисида раҳбариятнинг назорат каналига хабарнома юборилди.",
+            reply_markup=main_kb(message.from_user.id),
+            parse_mode="HTML"
+        )
+        return
+
+    # Если ПИН-код правильный:
+    if action == "download_passwords":
+        await message.answer("⏳ <b>ПИН-код тасдиқланди. Пароллар ҳужжати тайёрланмоқда...</b>", parse_mode="HTML")
+        buf = await generate_codes_docx(DEPARTMENTS)
+
+        await bot.send_document(
+            message.chat.id,
+            types.BufferedInputFile(buf.read(), filename="ADTI_Kafedralar_Parollari.docx"),
+            caption="🔑 <b>АДТИ: Барча 65 та кафедра учун кириш пароллари (кодлари)</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "Ушбу ҳужжатни чиқариб ёки мудирларга тарқатишингиз мумкин. Ҳар бир кафедра фақат ўз пароли орқали киради!",
+            reply_markup=main_kb(message.from_user.id),
+            parse_mode="HTML"
+        )
+
+        # Логируем успешный вход в аудит-канал
+        if AUDIT_CHANNEL_ID:
+            try:
+                log_text = (
+                    f"🔐 <b>#MASTER_PIN — ПАРОЛЛАР МУВАФФАҚИЯТЛИ ЮКЛАНДИ</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 <b>Администратор:</b> {admin_name} (ID: <code>{message.from_user.id}</code>)\n"
+                    f"📅 <b>Вақт:</b> {now_str}\n"
+                    f"🛡 <i>Мастер ПИН-код тўғри терилди. Ҳужжат жўнатилди.</i>"
+                )
+                await bot.send_message(AUDIT_CHANNEL_ID, log_text, parse_mode="HTML")
+            except Exception as e:
+                logger.warning(f"Failed to log pin success: {e}")
 
 
 # ─── ADMIN: ПРИНУДИТЕЛЬНАЯ СИНХРОНИЗАЦИЯ С GOOGLE SHEETS ────────────────────
