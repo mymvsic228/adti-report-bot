@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+_submission_count = 0
 
 
 # ─── FSM STATES ─────────────────────────────────────────────────────────────
@@ -314,32 +315,44 @@ async def backup_database_to_channel(reason: str = "автоматик"):
 
 
 async def periodic_backup_loop():
-    """Каждые 12 часов автоматически отправляет резервную копию базы в канал"""
+    """Ҳар 3 соатда автоматик тарзда базанинг тўлиқ бэкапини назорат каналига юборади"""
     while True:
-        await asyncio.sleep(43200)  # 12 часов
-        await backup_database_to_channel(reason="12 соатлик режали бэкап")
+        await asyncio.sleep(10800)  # 3 соат
+        await backup_database_to_channel(reason="3 соатлик режали бэкап")
 
 
-# ─── ADMIN: СКАЧАТЬ БЭКАП БАЗЫ ДАННЫХ ───────────────────────────────────────
+# ─── ADMIN: СКАЧАТЬ БЭКАП БАЗЫ ДАННЫХ (POSTGRESQL CSV) ──────────────────────
 @dp.message(Command("backup_db"))
 async def cmd_backup_db(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
         return
-    from config import DB_PATH
-    if not DB_PATH.exists():
-        await message.answer("❌ База файли топилмади.")
-        return
-    with open(DB_PATH, "rb") as f:
-        content = f.read()
-    import datetime
-    now_str = datetime.datetime.now().strftime("%Y_%m_%d_%H%M")
-    await bot.send_document(
-        message.chat.id,
-        types.BufferedInputFile(content, filename=f"adti_database_{now_str}.db"),
-        caption="💾 <b>АДТИ: SQLite тўлиқ база файли (.db)</b>\n\n"
-                "Ушбу файлда барча 65 та кафедранинг барча ҳисоботлари, пароллари ва маълумотлари мавжуд.",
-        parse_mode="HTML"
-    )
+
+    import datetime, io, csv
+    from database import get_all_detailed_entries
+
+    await message.answer("⏳ <b>PostgreSQL маълумотлар базаси бэкапи тайёрланмоқда...</b>", parse_mode="HTML")
+    try:
+        rows = await get_all_detailed_entries()
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        if rows:
+            writer.writerow(rows[0].keys())
+            for r in rows:
+                writer.writerow(r.values())
+        csv_bytes = buf.getvalue().encode("utf-8")
+        now_str = datetime.datetime.now().strftime("%Y_%m_%d_%H%M")
+
+        await bot.send_document(
+            message.chat.id,
+            types.BufferedInputFile(csv_bytes, filename=f"adti_database_{now_str}.csv"),
+            caption=f"💾 <b>АДТИ: PostgreSQL тўлиқ база бэкапи (.csv)</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"📊 <b>Жами ёзувлар:</b> {len(rows)} та\n"
+                    f"🛡 <i>Барча 65 та кафедра ҳисоботлари, файл дескрипторлари ва маълумотлари.</i>",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        await message.answer(f"❌ Бэкап яратишда хатолик: {e}")
 
 
 # ─── ADMIN: ВОССТАНОВИТЬ БАЗУ ДАННЫХ ────────────────────────────────────────
@@ -791,6 +804,11 @@ async def save_entry(message: types.Message, state: FSMContext,
         extra_lines=extra_lines,
     ))
     asyncio.create_task(sync_sheets_background())
+
+    global _submission_count
+    _submission_count += 1
+    if _submission_count % 30 == 0:
+        asyncio.create_task(backup_database_to_channel(reason=f"30 та янги ҳисобот тўпланди (#{entry_id})"))
 
     summary = await get_dept_summary(dept_id)
     label = INDICATOR_LABELS.get(cat, cat)
