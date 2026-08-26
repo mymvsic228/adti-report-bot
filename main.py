@@ -28,6 +28,7 @@ from report_gen import (
     generate_report_docx, generate_codes_docx, generate_report_excel,
     generate_files_zip
 )
+from ai_analysis import generate_dept_analysis, generate_full_analysis
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -143,11 +144,12 @@ STATE_FIELD_MAP = {
 
 # ─── KEYBOARDS ──────────────────────────────────────────────────────────────
 def main_kb(user_id: int):
-    """Эргономичная 2-колоночная клавиатура с понятными иконками"""
+    """Эргономичная клавиатура с понятными иконками"""
     if user_id in ADMIN_IDS:
         buttons = [
             [KeyboardButton(text="➕ Ҳисобот қўшиш")],
             [KeyboardButton(text="🏛 Сводный ҳисобот"), KeyboardButton(text="📊 Кафедра статистикаси")],
+            [KeyboardButton(text="🤖 AI Сводный таҳлил"), KeyboardButton(text="🤖 AI Кафедра таҳлили")],
             [KeyboardButton(text="📊 Excel ҳисобот (.xlsx)"), KeyboardButton(text="📥 Word ҳисобот (.docx)")],
             [KeyboardButton(text="📦 Файллар ZIP архиви"), KeyboardButton(text="🗂 Файллар базаси")],
             [KeyboardButton(text="🔑 Кафедралар пароллари"), KeyboardButton(text="🚪 Кафедрадан чиқиш")],
@@ -155,8 +157,9 @@ def main_kb(user_id: int):
     else:
         buttons = [
             [KeyboardButton(text="➕ Ҳисобот қўшиш")],
-            [KeyboardButton(text="📋 Юборилган ишлар"), KeyboardButton(text="📊 Кафедра статистикаси")],
-            [KeyboardButton(text="🗂 Файллар базаси"), KeyboardButton(text="🚪 Кафедрадан чиқиш")],
+            [KeyboardButton(text="🤖 AI Илмий таҳлил"), KeyboardButton(text="📊 Кафедра статистикаси")],
+            [KeyboardButton(text="📋 Юборилган ишлар"), KeyboardButton(text="🗂 Файллар базаси")],
+            [KeyboardButton(text="🚪 Кафедрадан чиқиш")],
         ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -1506,6 +1509,135 @@ async def download_report(message: types.Message):
         caption="✅ <b>АДТИ 2026 йил Word расмий ҳисоботи</b> — барча 65 та кафедра",
         parse_mode="HTML"
     )
+
+
+# ─── HELPER: УЗУН МАТННИ ХАВФСИЗ ЮБОРИШ (Telegram 4096 лимит) ───────────────
+async def send_long_text(chat_id: int, text: str, header: str = ""):
+    """Узун AI таҳлил матнини Telegram лимитига мос бўлакларга бўлиб чиройли юборади."""
+    if not text:
+        text = "Маълумот олинмади."
+
+    paragraphs = text.split("\n\n")
+    chunks = []
+    curr = f"{header}\n\n" if header else ""
+
+    for p in paragraphs:
+        if len(curr) + len(p) + 2 > 3800:
+            if curr.strip():
+                chunks.append(curr.strip())
+            curr = p + "\n\n"
+        else:
+            curr += p + "\n\n"
+    if curr.strip():
+        chunks.append(curr.strip())
+
+    for i, chunk in enumerate(chunks):
+        try:
+            await bot.send_message(chat_id, chunk, parse_mode="HTML")
+        except Exception:
+            # Fallback agar HTML parsingda belgi xatosi bo'lsa
+            await bot.send_message(chat_id, chunk)
+        if i < len(chunks) - 1:
+            await asyncio.sleep(0.3)
+
+
+# ─── AI ТАҲЛИЛ: БАРЧА КАФЕДРАЛАР БЎЙИЧА (СВОДНЫЙ) ───────────────────────────
+@dp.message(F.text.in_(["🤖 AI Сводный таҳлил", "🤖 AI Институт таҳлили", "/ai_summary"]))
+async def ai_full_analysis_handler(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⚠️ Ушбу функция фақат маъмурият (Admin) учун очиқ.")
+        return
+
+    loading_msg = await message.answer(
+        "🧠 <b>Gemini AI барча 65 та кафедра илмий кўрсаткичларини таҳлил қилмоқда...</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⏳ <i>База маълумотлари ўқилмоқда ва расмий илмий таҳлил матни ёзилмоқда (10–25 сония)...</i>",
+        parse_mode="HTML"
+    )
+
+    try:
+        all_data = await get_all_summary()
+        analysis_text = await generate_full_analysis(all_data)
+
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+
+        header = (
+            "🏛 <b>АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ</b>\n"
+            "📊 <b>2026 ЙИЛ ИЛМИЙ ФАОЛИЯТ БЎЙИЧА AI ТАҲЛИЛ ХИСОБОТИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        await send_long_text(message.chat.id, analysis_text, header=header)
+
+    except Exception as e:
+        logger.error(f"AI full analysis failed: {e}")
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        await message.answer(f"❌ AI таҳлилини тайёрлашда хатолик: {e}")
+
+
+# ─── AI ТАҲЛИЛ: БИТТА КАФЕДРА БЎЙИЧА ─────────────────────────────────────────
+@dp.message(F.text.in_(["🤖 AI Илмий таҳлил", "🤖 AI Кафедра таҳлили", "/ai_dept"]))
+async def ai_dept_analysis_handler(message: types.Message, state: FSMContext):
+    user_id = message.from_user.id
+    dept = await get_dept_by_user(user_id)
+    is_admin = user_id in ADMIN_IDS
+
+    if not dept:
+        if is_admin:
+            await message.answer(
+                "👑 <b>Администратор учун:</b>\n"
+                "Аниқ бир кафедра таҳлилини кўриш учун аввал кафедра паролини киритинг,\n"
+                "ёки <b>🤖 AI Сводный таҳлил</b> тугмасини босинг.",
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer("⚠️ Аввал кафедра паролини киритинг: /start")
+        return
+
+    loading_msg = await message.answer(
+        f"🧠 <b>Gemini AI «{dept['name']}» илмий кўрсаткичларини таҳлил қилмоқда...</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⏳ <i>Кафедра топширган ишлар ўрганилмоқда (5–15 сония)...</i>",
+        parse_mode="HTML"
+    )
+
+    try:
+        summary = await get_dept_summary(dept['id'])
+        entries = await get_dept_entries(dept['id'], limit=50)
+
+        analysis_text = await generate_dept_analysis(
+            dept_name=dept['name'],
+            head_name=dept.get('head_name', ''),
+            summary=summary,
+            entries=entries
+        )
+
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+
+        header = (
+            f"📂 <b>{dept['name']}</b>\n"
+            f"👤 Мудир: <b>{dept.get('head_name') or '—'}</b>\n"
+            "📊 <b>2026 ЙИЛ ИЛМИЙ ФАОЛИЯТИНИНГ AI ТАҲЛИЛИ</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        await send_long_text(message.chat.id, analysis_text, header=header)
+
+    except Exception as e:
+        logger.error(f"AI dept analysis failed: {e}")
+        try:
+            await loading_msg.delete()
+        except Exception:
+            pass
+        await message.answer(f"❌ Кафедра AI таҳлилини тайёрлашда хатолик: {e}")
+
 
 
 # ─── ADMIN: СКАЧАТЬ СПИСОК ПАРОЛЕЙ ВСЕХ 65 КАФЕДР (ЗАЩИЩЕНО MASTER PIN) ─────
