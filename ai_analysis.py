@@ -1,4 +1,4 @@
-﻿"""
+"""
 ai_analysis.py - Gemini API orqali ilmiy faoliyat tahlili
 Gemini REST API (aiohttp orqali, qoshimcha SDK kerak emas)
 """
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 GEMINI_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.0-flash:generateContent?key={key}"
+    "gemini-3.6-flash:generateContent?key={key}"
 )
 
 CATEGORY_LABELS = {
