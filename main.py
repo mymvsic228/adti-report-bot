@@ -101,10 +101,7 @@ CATEGORY_EXTRA_STEPS = {
         ("enter_publisher", "🏢 <b>[3/4-қадам] Нашриёт номи:</b>\n<i>(Масалан: Fan va texnologiya)</i>"),
         ("enter_pub_date",  "📅 <b>[4/4-қадам] Нашр йили ва санаси:</b>\n<i>(Масалан: 2026)</i>"),
     ],
-    "patent": [
-        ("enter_pub_date",   "📅 <b>[3/4-қадам] Патент берилган санаси:</b>\n<i>(Масалан: 23.02.2026)</i>"),
-        ("enter_reg_number", "🔢 <b>[4/4-қадам] Патент қайд рақами:</b>\n<i>(Масалан: IAP 8489 ёки DGU 60217)</i>"),
-    ],
+    "patent": [],   # custom flow: тури → санаси → мавзуси → муаллиф → файл
     "thesis_foreign": [
         ("enter_venue",    "📍 <b>[3/3-қадам] Анжуман ўтказилган жой ва сана:</b>\n<i>(Масалан: Москва, 15.04.2026)</i>"),
     ],
@@ -532,23 +529,34 @@ async def choose_category(cb: types.CallbackQuery, state: FSMContext):
     cat = cb.data[4:]
     await state.update_data(category=cat)
     label = INDICATOR_LABELS.get(cat, cat)
-    if cat == "conferences":
-        title_prompt = (
+
+    if cat == "patent":
+        await cb.message.edit_text(
+            f"✅ <b>{label}</b> танланди.\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 <b>[1/4-қадам] Патент тури:</b>\n"
+            "<i>(FAP / IAP / DGU)</i>",
+            parse_mode="HTML"
+        )
+        await state.set_state(AddEntry.enter_country)
+    elif cat == "conferences":
+        await cb.message.edit_text(
+            f"✅ <b>{label}</b> танланди.\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "📝 <b>[1/6-қадам] Анжуман мавзуси:</b>\n"
-            "<i>(Масалан: «Тиббиётда сунъий интеллект» мавзусидаги анжуман)</i>"
+            "<i>(Масалан: «Тиббиётда сунъий интеллект» мавзусидаги анжуман)</i>",
+            parse_mode="HTML"
         )
+        await state.set_state(AddEntry.enter_title)
     else:
-        title_prompt = (
+        await cb.message.edit_text(
+            f"✅ <b>{label}</b> танланди.\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
             "📝 <b>[1/N-қадам] Иш номини киритинг:</b>\n"
-            "<i>(Мақола, монография, патент ёки диссертация номи)</i>"
+            "<i>(Мақола, монография, патент ёки диссертация номи)</i>",
+            parse_mode="HTML"
         )
-    await cb.message.edit_text(
-        f"✅ <b>{label}</b> танланди.\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"{title_prompt}",
-        parse_mode="HTML"
-    )
-    await state.set_state(AddEntry.enter_title)
+        await state.set_state(AddEntry.enter_title)
     await cb.answer()
 
 
@@ -558,7 +566,12 @@ async def enter_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
     data = await state.get_data()
     cat = data.get('category', '')
-    if cat == "conferences":
+    if cat == "patent":
+        authors_prompt = (
+            "👤 <b>[4/4-қадам] Муаллиф (муаллифлар):</b>\n"
+            "<i>(Масалан: Каримов Б.Т., Ниёзов А.Р.)</i>"
+        )
+    elif cat == "conferences":
         authors_prompt = (
             "👤 <b>[2/6-қадам] Масъул шахс (ФИО ёки лавозими):</b>\n"
             "<i>(Масалан: Кафедра мудири Тошматов А.А. ёки АДТИ илмий бўлими)</i>"
@@ -618,7 +631,17 @@ async def handle_extra_step(message: types.Message, state: FSMContext, field_key
 
 @dp.message(AddEntry.enter_country, F.text)
 async def step_country(msg: types.Message, state: FSMContext):
-    await handle_extra_step(msg, state, 'country')
+    data = await state.get_data()
+    if data.get('category') == 'patent':
+        await state.update_data(country=msg.text.strip())
+        await msg.answer(
+            "📅 <b>[2/4-қадам] Олинган санаси:</b>\n"
+            "<i>(Масалан: 23.02.2026)</i>",
+            parse_mode="HTML"
+        )
+        await state.set_state(AddEntry.enter_pub_date)
+    else:
+        await handle_extra_step(msg, state, 'country')
 
 @dp.message(AddEntry.enter_journal, F.text)
 async def step_journal(msg: types.Message, state: FSMContext):
@@ -626,7 +649,17 @@ async def step_journal(msg: types.Message, state: FSMContext):
 
 @dp.message(AddEntry.enter_pub_date, F.text)
 async def step_pub_date(msg: types.Message, state: FSMContext):
-    await handle_extra_step(msg, state, 'pub_date')
+    data = await state.get_data()
+    if data.get('category') == 'patent':
+        await state.update_data(pub_date=msg.text.strip())
+        await msg.answer(
+            "📝 <b>[3/4-қадам] Мавзуси:</b>\n"
+            "<i>(Масалан: Юрак касалликларини эрта аниқлаш усули)</i>",
+            parse_mode="HTML"
+        )
+        await state.set_state(AddEntry.enter_title)
+    else:
+        await handle_extra_step(msg, state, 'pub_date')
 
 @dp.message(AddEntry.enter_url, F.text)
 async def step_url(msg: types.Message, state: FSMContext):
@@ -814,7 +847,10 @@ async def save_entry(message: types.Message, state: FSMContext,
 
     # Аудит-канал: қўшимча майдонлар
     extra_lines = ""
-    if cat == "conferences":
+    if cat == "patent":
+        if country:   extra_lines += f"\n📋 <b>Патент тури:</b> {country}"
+        if pub_date:  extra_lines += f"\n📅 <b>Олинган санаси:</b> {pub_date}"
+    elif cat == "conferences":
         if country:       extra_lines += f"\n📋 <b>Шакли:</b> {country}"
         if journal_name:  extra_lines += f"\n🌐 <b>Қулами:</b> {journal_name}"
         if pub_date:      extra_lines += f"\n📅 <b>Санаси:</b> {pub_date}"
