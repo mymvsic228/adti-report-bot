@@ -111,6 +111,12 @@ CATEGORY_EXTRA_STEPS = {
     "thesis_uz": [
         ("enter_venue",    "📍 <b>[3/3-қадам] Анжуман ўтказилган жой ва сана:</b>\n<i>(Масалан: Тошкент, 10.05.2026)</i>"),
     ],
+    "conferences": [
+        ("enter_country",       "📋 <b>[2/6-қадам] Анжуман шакли:</b>\n<i>(Масалан: Онлайн / Офлайн)</i>"),
+        ("enter_journal",       "🌐 <b>[3/6-қадам] Анжуман қулами:</b>\n<i>(Масалан: Маҳаллий / Республика / Халқаро)</i>"),
+        ("enter_pub_date",      "📅 <b>[4/6-қадам] Санаси:</b>\n<i>(Масалан: 15.03.2026)</i>"),
+        ("enter_authors_count", "👥 <b>[5/6-қадам] Қатнашувчилар сони:</b>\n<i>(Масалан: 45)</i>"),
+    ],
     "contracts": [
         ("enter_amount",   "💰 <b>[3/5-қадам] Шартнома суммаси (млн сўмда):</b>\n<i>(Масалан: 25 ёки 50.5)</i>"),
         ("enter_journal",  "🏢 <b>[4/5-қадам] Буюртмачи корхона / ташкилот номи:</b>\n<i>(Масалан: «Андижон биофарм» МЧЖ)</i>"),
@@ -526,11 +532,20 @@ async def choose_category(cb: types.CallbackQuery, state: FSMContext):
     cat = cb.data[4:]
     await state.update_data(category=cat)
     label = INDICATOR_LABELS.get(cat, cat)
+    if cat == "conferences":
+        title_prompt = (
+            "📝 <b>[1/6-қадам] Анжуман мавзуси:</b>\n"
+            "<i>(Масалан: «Тиббиётда сунъий интеллект» мавзусидаги анжуман)</i>"
+        )
+    else:
+        title_prompt = (
+            "📝 <b>[1/N-қадам] Иш номини киритинг:</b>\n"
+            "<i>(Мақола, монография, патент ёки диссертация номи)</i>"
+        )
     await cb.message.edit_text(
         f"✅ <b>{label}</b> танланди.\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📝 <b>[1/N-қадам] Иш номини киритинг:</b>\n"
-        f"<i>(Мақола, монография, патент ёки диссертация номи)</i>",
+        f"{title_prompt}",
         parse_mode="HTML"
     )
     await state.set_state(AddEntry.enter_title)
@@ -541,11 +556,19 @@ async def choose_category(cb: types.CallbackQuery, state: FSMContext):
 @dp.message(AddEntry.enter_title, F.text)
 async def enter_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text.strip())
-    await message.answer(
-        "👥 <b>[2/N-қадам] Муаллифларнинг Ф.И.Ш.ни киритинг:</b>\n"
-        "<i>(Масалан: Узбекова Нелли Рафиковна, Хужамбердиев М.)</i>",
-        parse_mode="HTML"
-    )
+    data = await state.get_data()
+    cat = data.get('category', '')
+    if cat == "conferences":
+        authors_prompt = (
+            "👤 <b>[2/6-қадам] Масъул шахс (ФИО ёки лавозими):</b>\n"
+            "<i>(Масалан: Кафедра мудири Тошматов А.А. ёки АДТИ илмий бўлими)</i>"
+        )
+    else:
+        authors_prompt = (
+            "👥 <b>[2/N-қадам] Муаллифларнинг Ф.И.Ш.ни киритинг:</b>\n"
+            "<i>(Масалан: Узбекова Нелли Рафиковна, Хужамбердиев М.)</i>"
+        )
+    await message.answer(authors_prompt, parse_mode="HTML")
     await state.set_state(AddEntry.enter_authors)
 
 
@@ -566,10 +589,20 @@ async def go_to_next_extra_step(message: types.Message, state: FSMContext):
         await message.answer(prompt, parse_mode="HTML")
     else:
         # Все доп-шаги пройдены — запрашиваем файл
+        if cat == "conferences":
+            file_prompt = (
+                "📎 <b>[6/6-қадам] Асос:</b>\n"
+                "<i>(Расм ёки баённома PDF кўринишида юборинг)</i>\n\n"
+                "Ёки 👇 тугмани босинг:"
+            )
+        else:
+            file_prompt = (
+                "📎 <b>Тасдиқловчи ҳужжатни юборинг</b>\n"
+                "<i>(PDF, Word ёки фото скан)</i>\n\n"
+                "Ёки 👇 тугмани босинг:"
+            )
         await message.answer(
-            "📎 <b>Тасдиқловчи ҳужжатни юборинг</b>\n"
-            "<i>(PDF, Word ёки фото скан)</i>\n\n"
-            "Ёки 👇 тугмани босинг:",
+            file_prompt,
             reply_markup=skip_kb(),
             parse_mode="HTML"
         )
@@ -781,15 +814,21 @@ async def save_entry(message: types.Message, state: FSMContext,
 
     # Аудит-канал: қўшимча майдонлар
     extra_lines = ""
-    if country:       extra_lines += f"\n🌍 <b>Давлат:</b> {country}"
-    if journal_name:  extra_lines += f"\n📰 <b>Журнал/Буюртмачи:</b> {journal_name}"
-    if pub_date:      extra_lines += f"\n📅 <b>Сана/Нашр:</b> {pub_date}"
-    if url:           extra_lines += f"\n🔗 <b>URL:</b> {url}"
-    if specialty:     extra_lines += f"\n🎓 <b>Ихтисослик:</b> {specialty}"
-    if reg_number:    extra_lines += f"\n🔢 <b>Рег. рақам:</b> {reg_number}"
-    if publisher:     extra_lines += f"\n🏢 <b>Нашриёт:</b> {publisher}"
-    if amount:        extra_lines += f"\n💰 <b>Суммаси:</b> {amount} млн сўм"
-    if authors_count: extra_lines += f"\n👥 <b>Муаллифлар сони:</b> {authors_count}"
+    if cat == "conferences":
+        if country:       extra_lines += f"\n📋 <b>Шакли:</b> {country}"
+        if journal_name:  extra_lines += f"\n🌐 <b>Қулами:</b> {journal_name}"
+        if pub_date:      extra_lines += f"\n📅 <b>Санаси:</b> {pub_date}"
+        if authors_count: extra_lines += f"\n👥 <b>Қатнашувчилар сони:</b> {authors_count}"
+    else:
+        if country:       extra_lines += f"\n🌍 <b>Давлат:</b> {country}"
+        if journal_name:  extra_lines += f"\n📰 <b>Журнал/Буюртмачи:</b> {journal_name}"
+        if pub_date:      extra_lines += f"\n📅 <b>Сана/Нашр:</b> {pub_date}"
+        if url:           extra_lines += f"\n🔗 <b>URL:</b> {url}"
+        if specialty:     extra_lines += f"\n🎓 <b>Ихтисослик:</b> {specialty}"
+        if reg_number:    extra_lines += f"\n🔢 <b>Рег. рақам:</b> {reg_number}"
+        if publisher:     extra_lines += f"\n🏢 <b>Нашриёт:</b> {publisher}"
+        if amount:        extra_lines += f"\n💰 <b>Суммаси:</b> {amount} млн сўм"
+        if authors_count: extra_lines += f"\n👥 <b>Муаллифлар сони:</b> {authors_count}"
 
     asyncio.create_task(send_to_audit_channel(
         dept_id=dept_id,
