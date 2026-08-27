@@ -4,13 +4,17 @@ from docx.shared import Pt
 from database import INDICATORS, INDICATOR_KEYS
 
 
-async def generate_report_docx(summary_rows: list) -> io.BytesIO:
+async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -> io.BytesIO:
     """
     Генерирует официальный Word-отчёт АДТИ по форме «2026 йил хисобот»
+    1-қисм: 65 та кафедра сводкаси
+    2-қисм: Илмий ишлар ва уларнинг муаллифлари батафсил рўйхати (Шаффофлик учун)
     """
+    from database import INDICATOR_LABELS
+
     doc = Document()
 
-    # Заголовок
+    # ─── 1-ҚИСМ: СВОДКА ТАБЛИЦАСИ ────────────────────────────────────────────
     title = doc.add_paragraph()
     title.alignment = 1  # CENTER
     run = title.add_run("АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ КАФЕДРАЛАРИ ТОМОНИДАН\n")
@@ -73,12 +77,69 @@ async def generate_report_docx(summary_rows: list) -> io.BytesIO:
     for i, t in enumerate(totals):
         total_row[i + 3].text = str(t) if t else ''
 
-    # Формат шрифтов
+    # Формат шрифтов таблицы 1
     for row in table.rows:
         for cell in row.cells:
             for para in cell.paragraphs:
                 for run in para.runs:
                     run.font.size = Pt(8)
+
+    # ─── 2-ҚИСМ: МУАЛЛИФЛАР ВА ИШЛАР БАТАФСИЛ РЎЙХАТИ (ИЛОВА) ─────────────────
+    if detailed_rows:
+        doc.add_page_break()
+
+        p2 = doc.add_paragraph()
+        p2.alignment = 1
+        r_app = p2.add_run("ИЛОВА — 2-ҚИСМ\n")
+        r_app.bold = True
+        r_app.font.size = Pt(11)
+        r_app2 = p2.add_run("КАФЕДРАЛАР КЕСИМИДА ИЛМИЙ ИШЛАР ВА УЛАРНИНГ МУАЛЛИФЛАРИ БАТАФСИЛ РЎЙХАТИ\n(ШАФФОФЛИК ҲИСОБОТИ)")
+        r_app2.bold = True
+        r_app2.font.size = Pt(12)
+
+        p_info = doc.add_paragraph()
+        p_info.add_run(f"Жами рўйхатга олинган ишлар: {len(detailed_rows)} та\n").italic = True
+
+        det_cols = [
+            "Т/Р", "Кафедра номи", "Йўналиш",
+            "Иш номи / Мавзу", "Муаллифлар (Ф.И.Ш.)", "Қўшимча маълумот (Журнал/Сана)"
+        ]
+
+        det_table = doc.add_table(rows=1, cols=len(det_cols))
+        det_table.style = "Table Grid"
+
+        det_hdr = det_table.rows[0].cells
+        for i, h in enumerate(det_cols):
+            det_hdr[i].text = h
+            det_hdr[i].paragraphs[0].runs[0].bold = True
+
+        for idx, d in enumerate(detailed_rows, 1):
+            row = det_table.add_row().cells
+            row[0].text = str(idx)
+            row[1].text = str(d.get('dept_name', '') or f"Кафедра #{d.get('dept_id', '')}")
+            cat_k = d.get('category', '')
+            row[2].text = INDICATOR_LABELS.get(cat_k, cat_k)
+            row[3].text = str(d.get('title', '') or '—')
+            
+            # Муаллифлар алоҳида ажралиб туради (Bold)
+            row[4].text = str(d.get('authors', '') or '—')
+            if row[4].paragraphs and row[4].paragraphs[0].runs:
+                row[4].paragraphs[0].runs[0].bold = True
+
+            # Қўшимча майдонлар (журнал, сана, давлат, сумма)
+            extra_parts = []
+            if d.get('country'): extra_parts.append(f"Давлат: {d['country']}")
+            if d.get('journal_name'): extra_parts.append(f"Журнал: {d['journal_name']}")
+            if d.get('pub_date'): extra_parts.append(f"Сана: {d['pub_date']}")
+            if d.get('amount'): extra_parts.append(f"Сумма: {d['amount']} млн")
+            if d.get('reg_number'): extra_parts.append(f"Рег: {d['reg_number']}")
+            row[5].text = "; ".join(extra_parts) if extra_parts else "—"
+
+        for row in det_table.rows:
+            for cell in row.cells:
+                for para in cell.paragraphs:
+                    for run in para.runs:
+                        run.font.size = Pt(8)
 
     buf = io.BytesIO()
     doc.save(buf)

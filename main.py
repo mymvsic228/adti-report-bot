@@ -934,6 +934,8 @@ async def my_stats(message: types.Message, state: FSMContext):
         return
 
     summary = await get_dept_summary(dept['id'])
+    entries = await get_dept_entries(dept['id'], limit=50)
+
     lines = [
         f"📊 <b>КАФЕДРА СТАТИСТИКАСИ</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -953,6 +955,22 @@ async def my_stats(message: types.Message, state: FSMContext):
         lines.append("  <i>Ҳозирча юборилган илмий ишлар йўқ</i>")
 
     lines.append(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📈 <b>Жами топширилган ишлар: {total} та</b>")
+
+    # Муаллифлар рўйхати (шаффофлик учун)
+    author_counts = {}
+    for e in entries:
+        auth_str = (e.get('authors') or '').strip()
+        for a in auth_str.replace(";", ",").split(","):
+            ac = a.strip()
+            if ac and len(ac) > 2 and ac.lower() not in ["va boshqalar", "et al", "—"]:
+                author_counts[ac] = author_counts.get(ac, 0) + 1
+
+    if author_counts:
+        top_auth = sorted(author_counts.items(), key=lambda x: -x[1])
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n👥 <b>Иш топширган муаллифлар (шаффофлик):</b>")
+        for a_name, cnt in top_auth[:10]:
+            lines.append(f"  • <b>{a_name}</b> — {cnt} та иш")
+
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -1501,12 +1519,16 @@ async def download_report(message: types.Message):
 
     await message.answer("⏳ <b>Word ҳисобот яратилмоқда (.docx)...</b>", parse_mode="HTML")
     rows = await get_all_summary()
-    buf = await generate_report_docx(rows)
+    detailed_rows = await get_all_detailed_entries()
+    buf = await generate_report_docx(rows, detailed_rows)
 
     await bot.send_document(
         message.chat.id,
         types.BufferedInputFile(buf.read(), filename="ADTI_2026_hisobot.docx"),
-        caption="✅ <b>АДТИ 2026 йил Word расмий ҳисоботи</b> — барча 65 та кафедра",
+        caption="✅ <b>АДТИ 2026 йил Word расмий ҳисоботи</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "📊 <b>1-қисм:</b> 65 та кафедра сводкаси\n"
+                "📝 <b>2-қисм (Илова):</b> Илмий ишлар ва уларнинг муаллифлари (шаффофлик рўйхати)",
         parse_mode="HTML"
     )
 
@@ -1557,7 +1579,8 @@ async def ai_full_analysis_handler(message: types.Message):
 
     try:
         all_data = await get_all_summary()
-        analysis_text = await generate_full_analysis(all_data)
+        detailed_entries = await get_all_detailed_entries()
+        analysis_text = await generate_full_analysis(all_data, detailed_entries)
 
         try:
             await loading_msg.delete()
