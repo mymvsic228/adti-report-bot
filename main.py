@@ -29,6 +29,7 @@ from report_gen import (
     generate_files_zip
 )
 from ai_analysis import generate_dept_analysis, generate_full_analysis
+from scopus_verifier import verify_article
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -800,8 +801,22 @@ async def save_entry(message: types.Message, state: FSMContext,
     publisher      = data.get('publisher', '')
     amount         = data.get('amount', '')
 
+    # ── АВТОМАТИК ТЕКШИРУВ (Scopus / Web of Science / Халқаро базалар) ──
+    doi_val = ""
+    api_verify_line = ""
+    if cat in ("scopus_wos", "oak_ru_if"):
+        try:
+            ver_res = await verify_article(title=title, journal=journal_name, authors=authors, url_or_doi=url)
+            doi_val = ver_res.get('badge_excel', '')
+            badge_tg = ver_res.get('badge', '')
+            if badge_tg:
+                api_verify_line = f"\n🔍 <b>Халқаро база (API):</b> {badge_tg}"
+        except Exception as e:
+            logger.warning(f"Auto-verification error: {e}")
+
     entry_data = dict(
         category=cat, title=title, authors=authors, year=2026,
+        doi=doi_val,
         file_path=file_path, file_id=file_id,
         country=country, journal_name=journal_name, pub_date=pub_date, url=url,
         authors_count=authors_count, specialty=specialty, reg_number=reg_number,
@@ -818,6 +833,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         # ── РЕЖИМ СОЗДАНИЯ: INSERT новой записи ──
         entry_id = await add_entry(
             dept_id=dept_id, category=cat, title=title, authors=authors, year=2026,
+            doi=doi_val,
             file_path=file_path, file_id=file_id,
             country=country, journal_name=journal_name, pub_date=pub_date, url=url,
             authors_count=authors_count, specialty=specialty, reg_number=reg_number,
@@ -869,6 +885,9 @@ async def save_entry(message: types.Message, state: FSMContext,
         if amount:        extra_lines += f"\n💰 <b>Суммаси:</b> {amount} млн сўм"
         if authors_count: extra_lines += f"\n👥 <b>Муаллифлар сони:</b> {authors_count}"
 
+    if api_verify_line:
+        extra_lines += f"\n{api_verify_line.strip()}"
+
     asyncio.create_task(send_to_audit_channel(
         dept_id=dept_id,
         dept_name=dept_name,
@@ -902,7 +921,7 @@ async def save_entry(message: types.Message, state: FSMContext,
         f"📌 <b>Категория:</b> {label}\n"
         f"📝 <b>Иш номи:</b> {title}\n"
         f"👥 <b>Муаллиф(лар):</b> {authors}\n"
-        f"📄 <b>Ҳолати:</b> {has_file_str}\n"
+        f"📄 <b>Ҳолати:</b> {has_file_str}{api_verify_line}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📊 Ушбу йўналишдаги жами ишлар: <b>{total_cat} та</b>",
         reply_markup=main_kb(user_id),

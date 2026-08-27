@@ -326,6 +326,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     for d in detailed_rows:
         has_f = "✅ Ҳа" if d['file_path'] else "❌ Йўқ"
         cat_lbl = INDICATOR_LABELS.get(d['category'], d['category'])
+        doi_or_url = d.get('doi', '') or d.get('url', '') or ''
         r_data = [
             d['id'], str(d['created_at'])[:16], d['dept_id'], d['dept_name'],
             d['head_name'] or '', cat_lbl,
@@ -335,7 +336,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             d.get('country', '') or '',
             d.get('journal_name', '') or '',
             d.get('pub_date', '') or '',
-            d.get('url', '') or '',
+            doi_or_url,
             d.get('authors_count', '') or '',
             d.get('specialty', '') or '',
             d.get('reg_number', '') or '',

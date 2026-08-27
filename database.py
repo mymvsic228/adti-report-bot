@@ -464,7 +464,7 @@ async def get_all_detailed_entries() -> list:
         async with pool.acquire() as conn:
             rows = await conn.fetch("""
                 SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
-                       i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.file_id, i.notes,
+                       i.category, i.title, i.authors, i.year, i.journal, i.doi, i.file_path, i.file_id, i.notes,
                        i.country, i.journal_name, i.pub_date, i.url,
                        i.authors_count, i.specialty, i.reg_number, i.publisher, i.amount
                 FROM indicators i
@@ -477,7 +477,7 @@ async def get_all_detailed_entries() -> list:
         db.row_factory = aiosqlite.Row
         cur = await db.execute("""
             SELECT i.id, i.created_at, d.id as dept_id, d.name as dept_name, d.head_name,
-                   i.category, i.title, i.authors, i.year, i.journal, i.file_path, i.file_id, i.notes,
+                   i.category, i.title, i.authors, i.year, i.journal, i.doi, i.file_path, i.file_id, i.notes,
                    i.country, i.journal_name, i.pub_date, i.url,
                    i.authors_count, i.specialty, i.reg_number, i.publisher, i.amount
             FROM indicators i
@@ -708,7 +708,7 @@ async def update_entry_title(entry_id: int, new_title: str, dept_id: int = None)
 async def update_entry_full(entry_id: int, data: dict) -> bool:
     """Полностью обновляет все поля записи отчёта по её ID.
     Файл обновляется только если в data есть непустой 'file_id'."""
-    fields = ['title', 'authors', 'country', 'journal_name', 'pub_date',
+    fields = ['title', 'authors', 'doi', 'country', 'journal_name', 'pub_date',
               'url', 'authors_count', 'specialty', 'reg_number', 'publisher', 'amount']
 
     pool = await get_pg_pool()
