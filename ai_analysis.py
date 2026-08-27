@@ -3,16 +3,21 @@ ai_analysis.py - Gemini API orqali ilmiy faoliyat tahlili
 Gemini REST API (aiohttp orqali, qoshimcha SDK kerak emas)
 """
 
+import asyncio
 import aiohttp
 import logging
 from config import GEMINI_API_KEY
 
 logger = logging.getLogger(__name__)
 
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-3.6-flash:generateContent?key={key}"
-)
+AVAILABLE_MODELS = [
+    "gemini-3.5-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemma-4-31b-it",
+    "gemini-flash-latest",
+]
 
 CATEGORY_LABELS = {
     "dsc":            "DSc dissertatsiya himoyasi",
@@ -39,34 +44,50 @@ async def _call_gemini(prompt: str) -> str:
             "Render -> Environment -> GEMINI_API_KEY qiymatini kiriting."
         )
 
-    url = GEMINI_URL.format(key=GEMINI_API_KEY)
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
         "generationConfig": {
-            "temperature": 0.7,
+            "temperature": 0.6,
             "maxOutputTokens": 4096,
         }
     }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=90)
-            ) as resp:
-                if resp.status != 200:
-                    text = await resp.text()
-                    logger.error(f"Gemini API error {resp.status}: {text[:300]}")
-                    return f"Gemini xatosi ({resp.status}). Keyinroq urinib ko'ring."
-                data = await resp.json()
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    return "Gemini javob bermadi. Keyinroq urinib ko'ring."
-                return candidates[0]["content"]["parts"][0]["text"]
-    except aiohttp.ClientError as e:
-        logger.error(f"Gemini network error: {e}")
-        return "Tarmoq xatosi. Keyinroq urinib ko'ring."
-    except Exception as e:
-        logger.error(f"Gemini unexpected error: {e}")
-        return f"Kutilmagan xato: {type(e).__name__}"
+
+    last_error = ""
+    async with aiohttp.ClientSession() as session:
+        for model in AVAILABLE_MODELS:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={GEMINI_API_KEY}"
+            )
+            try:
+                async with session.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=50)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        candidates = data.get("candidates", [])
+                        if (
+                            candidates
+                            and "content" in candidates[0]
+                            and "parts" in candidates[0]["content"]
+                        ):
+                            text = candidates[0]["content"]["parts"][0].get("text", "")
+                            if text:
+                                return text
+                    elif resp.status == 429:
+                        last_error = "Rate limit (429)"
+                        logger.warning(f"Model {model} hit 429, trying next model in pool...")
+                    else:
+                        text = await resp.text()
+                        last_error = f"{resp.status}: {text[:120]}"
+                        logger.warning(f"Model {model} returned {resp.status}, trying next...")
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Model {model} exception {e}, trying next...")
+
+            await asyncio.sleep(0.5)
+
+    return f"❌ Gemini xatosi ({last_error}). Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring."
 
 
 def _build_dept_prompt(dept_name: str, head_name: str, summary: dict, entries: list) -> str:
