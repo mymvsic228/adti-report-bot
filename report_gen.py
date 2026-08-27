@@ -350,8 +350,152 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             cell.border = thin_border
             cell.alignment = left_align if col_idx in (4, 7, 8, 9, 10, 11, 12, 13, 15) else center_align
 
-    # Автоширина колонок
-    for ws in (ws1, ws2):
+    # ─── ЛИСТ 3: КАФЕДРАЛАР РЕЙТИНГИ ВА ЛИДЕРЛАР ────────────────────────────
+    ws3 = wb.create_sheet(title="Кафедралар рейтинги")
+    ws3.views.sheetView[0].showGridLines = True
+
+    # Заголовок Листа 3
+    ws3.merge_cells("A1:N1")
+    title_r = ws3["A1"]
+    title_r.value = "АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — КАФЕДРАЛАРНИНГ ИЛМИЙ ФАОЛЛИК РЕЙТИНГИ (2026 ЙИЛ)"
+    title_r.font = Font(name="Calibri", size=13, bold=True, color="1F4E79")
+    title_r.alignment = Alignment(horizontal="center", vertical="center")
+    ws3.row_dimensions[1].height = 28
+
+    rank_headers = [
+        "Ўрни (Рейтинг)", "Кафедра ID", "Кафедра номи", "Кафедра мудири",
+        "ЖАМИ ИШЛАР", "Scopus / WoS", "ЎзОАК мақола", "Россия ОАК / IF",
+        "Патентлар", "DSc / PhD", "Монография", "Тезислар (Ўз/Хор)",
+        "Шартнома / Грант", "Фаоллик ҳолати"
+    ]
+    ws3.append([])
+    ws3.append(rank_headers)
+    ws3.row_dimensions[3].height = 26
+
+    rank_header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
+    top10_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # soft green
+    zero_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")   # soft red
+
+    for col_num in range(1, len(rank_headers) + 1):
+        c = ws3.cell(row=3, column=col_num)
+        c.font = header_font
+        c.fill = rank_header_fill
+        c.alignment = center_align
+        c.border = thin_border
+
+    # Сортировка кафедр по убыванию количества работ
+    sorted_depts = sorted(summary_rows, key=lambda r: -(r.get('total') or 0))
+
+    for rank, r in enumerate(sorted_depts, 1):
+        tot = r.get('total') or 0
+        diss = (r.get('dsc') or 0) + (r.get('phd') or 0)
+        theses = (r.get('thesis_uz') or 0) + (r.get('thesis_foreign') or 0)
+        grants = (r.get('contracts') or 0) + (r.get('grants') or 0)
+
+        if tot >= 50:
+            status_txt = "🔥 Юқори фаол (Лидер)"
+        elif tot >= 15:
+            status_txt = "✅ Фаол"
+        elif tot > 0:
+            status_txt = "⚠️ Паст кўрсаткич"
+        else:
+            status_txt = "❌ Иш топширмаган (0)"
+
+        row_vals = [
+            f"#{rank}", r['id'], r['name'], r['head_name'] or '—',
+            tot, r['scopus_wos'] or 0, r['oak_uz'] or 0, r['oak_ru_if'] or 0,
+            r['patent'] or 0, diss, r['monography'] or 0, theses,
+            grants, status_txt
+        ]
+        ws3.append(row_vals)
+        curr = ws3.max_row
+        ws3.row_dimensions[curr].height = 20
+
+        is_top10 = rank <= 10 and tot > 0
+        is_zero = tot == 0
+
+        for col_idx in range(1, len(row_vals) + 1):
+            cell = ws3.cell(row=curr, column=col_idx)
+            cell.font = bold_font if col_idx in (1, 5, 14) else regular_font
+            cell.border = thin_border
+            if is_top10:
+                cell.fill = top10_fill
+            elif is_zero:
+                cell.fill = zero_fill
+
+            if col_idx in (3, 4):
+                cell.alignment = left_align
+            else:
+                cell.alignment = center_align
+
+    # ─── ТАБЛИЦА 2: ТОП-30 МУАЛЛИФЛАР (ЛИСТ 3) ──────────────────────────────
+    ws3.append([])
+    ws3.append([])
+    author_table_start = ws3.max_row + 1
+
+    ws3.merge_cells(f"A{author_table_start}:H{author_table_start}")
+    auth_title = ws3[f"A{author_table_start}"]
+    auth_title.value = "ИНСТИТУТНИНГ ЭНГ ФАОЛ МУАЛЛИФЛАРИ ВА ТАДҚИҚОТЧИЛАРИ (ТОП-30)"
+    auth_title.font = Font(name="Calibri", size=12, bold=True, color="1F4E79")
+    auth_title.alignment = Alignment(horizontal="center", vertical="center")
+    ws3.row_dimensions[author_table_start].height = 26
+
+    auth_headers = [
+        "Ўрни", "Муаллифнинг Ф.И.Ш.", "Кафедра номи",
+        "ЖАМИ ИШЛАРИ", "Scopus / WoS", "Патентлар", "ЎзОАК / ОАК", "Диссертация / Тезислар"
+    ]
+    ws3.append(auth_headers)
+    hdr_row_idx = ws3.max_row
+    ws3.row_dimensions[hdr_row_idx].height = 24
+    for col_num in range(1, len(auth_headers) + 1):
+        c = ws3.cell(row=hdr_row_idx, column=col_num)
+        c.font = header_font
+        c.fill = rank_header_fill
+        c.alignment = center_align
+        c.border = thin_border
+
+    # Подсчёт активности авторов
+    authors_data = {}
+    for d in detailed_rows:
+        auth_str = (d.get('authors') or '').strip()
+        dept_name = d.get('dept_name') or ''
+        cat = d.get('category') or ''
+        for raw_a in auth_str.replace(";", ",").split(","):
+            a = raw_a.strip()
+            if a and len(a) > 2 and a.lower() not in ["va boshqalar", "et al", "—"]:
+                if a not in authors_data:
+                    authors_data[a] = {"dept": dept_name, "total": 0, "scopus": 0, "patent": 0, "oak": 0, "other": 0}
+                authors_data[a]["total"] += 1
+                if not authors_data[a]["dept"] and dept_name:
+                    authors_data[a]["dept"] = dept_name
+                if cat == "scopus_wos":
+                    authors_data[a]["scopus"] += 1
+                elif cat == "patent":
+                    authors_data[a]["patent"] += 1
+                elif cat in ("oak_uz", "oak_ru_if"):
+                    authors_data[a]["oak"] += 1
+                else:
+                    authors_data[a]["other"] += 1
+
+    sorted_authors = sorted(authors_data.items(), key=lambda x: -x[1]["total"])
+
+    for a_rank, (a_name, a_info) in enumerate(sorted_authors[:30], 1):
+        a_row = [
+            f"#{a_rank}", a_name, a_info["dept"] or "—",
+            a_info["total"], a_info["scopus"], a_info["patent"],
+            a_info["oak"], a_info["other"]
+        ]
+        ws3.append(a_row)
+        curr = ws3.max_row
+        ws3.row_dimensions[curr].height = 20
+        for col_idx in range(1, len(a_row) + 1):
+            cell = ws3.cell(row=curr, column=col_idx)
+            cell.font = bold_font if col_idx in (1, 4) else regular_font
+            cell.border = thin_border
+            cell.alignment = left_align if col_idx in (2, 3) else center_align
+
+    # Автоширина колонок для всех листов
+    for ws in (ws1, ws2, ws3):
         for col in ws.columns:
             max_len = 0
             col_letter = get_column_letter(col[0].column)
@@ -369,6 +513,13 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     ws2.column_dimensions["J"].width = 32
     ws2.column_dimensions["K"].width = 25
     ws2.column_dimensions["L"].width = 45
+
+    ws3.column_dimensions["A"].width = 16
+    ws3.column_dimensions["B"].width = 12
+    ws3.column_dimensions["C"].width = 40
+    ws3.column_dimensions["D"].width = 28
+    ws3.column_dimensions["E"].width = 16
+    ws3.column_dimensions["N"].width = 24
 
     buf = io.BytesIO()
     wb.save(buf)

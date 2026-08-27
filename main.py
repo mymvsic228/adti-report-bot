@@ -1503,10 +1503,11 @@ async def download_excel_report(message: types.Message):
     await bot.send_document(
         message.chat.id,
         types.BufferedInputFile(buf.read(), filename="ADTI_2026_hisobot.xlsx"),
-        caption="✅ <b>АДТИ 2026 йил Excel ҳисоботи (.xlsx)</b>\n"
+        caption="✅ <b>АДТИ 2026 йил Excel расмий ҳисоботи (.xlsx)</b>\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "📊 <b>1-варақ:</b> 65 та кафедра сводкаси (барча 17 индикатор + жами суммалар)\n"
-                "📝 <b>2-варақ:</b> Барча юборилган илмий ишлар базаси (давлат, журнал, сана, муаллифлар)",
+                "📊 <b>1-варақ:</b> 65 та кафедра сводкаси (барча 17 индикатор)\n"
+                "📝 <b>2-варақ:</b> Барча юборилган илмий ишлар базаси (муаллифлар билан)\n"
+                "🏆 <b>3-варақ:</b> Кафедралар фаоллик рейтинги (#1..#65) ва ТОП-30 фаол муаллифлар",
         parse_mode="HTML"
     )
 
@@ -1533,13 +1534,38 @@ async def download_report(message: types.Message):
     )
 
 
-# ─── HELPER: УЗУН МАТННИ ХАВФСИЗ ЮБОРИШ (Telegram 4096 лимит) ───────────────
+# ─── HELPER: УЗУН МАТННИ ЧИРОЙЛИ ВА ХАВФСИЗ ЮБОРИШ (Telegram HTML) ──────────
+def format_telegram_html(text: str) -> str:
+    """Markdown форматдаги AI жавобини чиройли ва бенуқсон Telegram HTML кўринишига ўтказади."""
+    if not text:
+        return ""
+    import re
+    # 1. Escape &
+    text = text.replace("&", "&amp;")
+    # 2. Headers ### Title -> <b>Title</b>
+    text = re.sub(r'^(?:#{1,4})\s*(.+)$', r'<b>\1</b>', text, flags=re.MULTILINE)
+    # 3. **bold** -> <b>bold</b>
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    # 4. *italic* -> <i>italic</i>
+    text = re.sub(r'(?<!\*)\*([^\*\n]+?)\*(?!\*)', r'<i>\1</i>', text)
+    # 5. Bullet points
+    text = re.sub(r'^\s*[\*\-•]\s*', '• ', text, flags=re.MULTILINE)
+    # 6. Horizontal rules
+    text = re.sub(r'^\s*[-—_]{3,}\s*$', '━━━━━━━━━━━━━━━━━━━━━━━━━━━━', text, flags=re.MULTILINE)
+    # 7. Clean leftover asterisks
+    text = text.replace("**", "").replace("• •", "• ")
+    # 8. Extra newlines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
 async def send_long_text(chat_id: int, text: str, header: str = ""):
     """Узун AI таҳлил матнини Telegram лимитига мос бўлакларга бўлиб чиройли юборади."""
-    if not text:
-        text = "Маълумот олинмади."
+    clean_text = format_telegram_html(text)
+    if not clean_text:
+        clean_text = "Маълумот олинмади."
 
-    paragraphs = text.split("\n\n")
+    paragraphs = clean_text.split("\n\n")
     chunks = []
     curr = f"{header}\n\n" if header else ""
 
