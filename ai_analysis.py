@@ -88,8 +88,6 @@ async def _call_gemini(prompt: str) -> str:
             await asyncio.sleep(0.5)
 
     return f"❌ Gemini xatosi ({last_error}). Iltimos, 1 daqiqadan so'ng qayta urinib ko'ring."
-
-
 def _build_dept_prompt(dept_name: str, head_name: str, summary: dict, entries: list) -> str:
     total = sum(summary.get(k, 0) for k in CATEGORY_LABELS)
     stats_lines = [
@@ -98,141 +96,87 @@ def _build_dept_prompt(dept_name: str, head_name: str, summary: dict, entries: l
     ]
     stats_text = "\n".join(stats_lines) or "  Ma'lumot yo'q"
 
-    # Mualliflar bo'yicha hisob-kitob (shaffoflik)
-    author_counts = {}
-    works_lines = []
-    for idx, e in enumerate(entries[:50], 1):
-        cat = CATEGORY_LABELS.get(e.get("category", ""), e.get("category", ""))
-        title = (e.get("title") or "—").strip()
-        authors = (e.get("authors") or "Ko'rsatilmagan").strip()
-
-        for raw_author in authors.replace(";", ",").split(","):
-            a_clean = raw_author.strip()
-            if a_clean and len(a_clean) > 2 and a_clean.lower() not in ["va boshqalar", "et al", "—"]:
-                author_counts[a_clean] = author_counts.get(a_clean, 0) + 1
-
-        works_lines.append(f"  {idx}. [{cat}] «{title}» — Muallif(lar): {authors}")
-
-    works_text = "\n".join(works_lines) or "  Ma'lumot yo'q"
-
-    top_authors = sorted(author_counts.items(), key=lambda x: -x[1])
-    authors_summary = "\n".join(f"  • {name} — {cnt} ta ish" for name, cnt in top_authors[:15]) or "  Ma'lumot yo'q"
-
     return f"""Siz ADTI (Andijon davlat tibbiyot instituti) ilmiy bo'limi tahlilchisisiz.
 
-Quyidagi kafedra ma'lumotlari asosida O'ZBEK TILIDA QISQA, LAKONIK, ANIQ va OPTIMAL tahlil matnini yozing.
-ORTIQCHA SUV VA UZUN GAPLAR BO'LMASIN. FAQAT ANIQ FAKTLAR, MUALLIFLAR VA NATIJALAR BO'LSIN.
+Quyidagi kafedra ma'lumotlari asosida O'ZBEK TILIDA rasmiy ilmiy-tahliliy hisobot matnini yozing:
 
 === KAFEDRA MA'LUMOTLARI ===
 Nomi: {dept_name}
 Mudiri: {head_name or "Ko'rsatilmagan"}
-Jami topshirilgan ishlar: {total} ta
+Jami topshirilgan ilmiy ishlar: {total} ta
 
 === YO'NALISHLAR BO'YICHA NATIJALAR ===
 {stats_text}
 
-=== MUALLIFLAR VA ULARNING ISHLARI SONI (SHAFFOFLIK) ===
-{authors_summary}
+=== TALAB QILINADIGAN TUZILMA ===
+Quyidagi 4 ta bo'lim bo'yicha ravon, mantiqiy va rasmiy tahliliy matn yozing:
 
-=== TOPSHIRILGAN ISHLAR VA MUALLIFLAR RO'YXATI ===
-{works_text}
-
-=== TALAB QILINADIGAN STRUKTURA (QISQA VA ANIQ) ===
-1. **Kafedra ilmiy natijalari qisqacha** (Jami ishlar va asosiy yo'nalishlar)
-2. **Mualliflar va ularning ilmiy hissasi (Shaffoflik)** (Kafedrada ish topshirgan mualliflarning ism-shariflari va hissalari)
-3. **Kuchli va zaif yo'nalishlar** (2-3 ta aniq punkt)
-4. **Takliflar va xulosa** (2-3 ta aniq amaliy punkt)
-
-Matn toza, tushunarli, optimal bo'lsin.
+1. **Umumiy baho** — kafedraning 2026 yildagi ilmiy faolligi, umumiy salohiyati va natijalari
+2. **Kuchli yo'nalishlar** — yuqori ko'rsatkichga erishilgan ilmiy yo'nalishlar tahlili
+3. **Mavjud kamchiliklar** — e'tibor qaratish kerak bo'lgan, sust rivojlangan sohalar
+4. **Tavsiyalar va yakuniy xulosa** — kafedra ilmiy salohiyatini oshirish bo'yicha amaliy takliflar va xulosa
 """
 
 
 def _build_full_prompt(all_data: list, detailed_entries: list = None) -> str:
     total_all = 0
     dept_stats = []
+    category_totals = {k: 0 for k in CATEGORY_LABELS}
+
     for row in all_data:
         name = row.get("name", "?")
         total = sum(row.get(k, 0) for k in CATEGORY_LABELS)
         total_all += total
-        if total > 0:
-            dept_stats.append((name, total, row))
+        for k in CATEGORY_LABELS:
+            category_totals[k] += (row.get(k, 0) or 0)
+        dept_stats.append((name, total, row))
 
-    # Reyting: eng ko'p ish topshirgan kafedralar
     dept_stats.sort(key=lambda x: -x[1])
-    leaderboard_lines = []
-    for i, (n, c, row) in enumerate(dept_stats, 1):
-        parts = [f"{CATEGORY_LABELS[k]}: {row[k]}" for k in CATEGORY_LABELS if row.get(k, 0) > 0]
-        leaderboard_lines.append(f"  {i}. {n} — {c} ta ish ({', '.join(parts[:3])})")
-    leaderboard_text = "\n".join(leaderboard_lines) or "  Hozircha ishlar topshirilmagan"
+    top5 = "\n".join(f"  {i+1}. {n} — {c} ta ish" for i, (n, c, _) in enumerate(dept_stats[:5]))
+    bot5 = "\n".join(f"  {i+1}. {n} — {c} ta ish" for i, (n, c, _) in enumerate(dept_stats[-5:]))
 
-    # Ish kiritmagan kafedralar
-    zero_depts = [row.get("name", "?") for row in all_data if sum(row.get(k, 0) for k in CATEGORY_LABELS) == 0]
-    zero_depts_text = f"  Jami {len(zero_depts)} ta kafedrada hali ishlar kiritilmagan."
+    cat_lines = [
+        f"  • {CATEGORY_LABELS[k]}: {v} ta"
+        for k, v in category_totals.items() if v > 0
+    ]
+    cat_text = "\n".join(cat_lines)
 
-    # Institut bo'yicha eng faol mualliflar reytingi (shaffoflik)
-    authors_ranking_text = "  Ma'lumot yo'q"
-    if detailed_entries:
-        inst_authors = {}
-        for d in detailed_entries:
-            auth_str = (d.get("authors") or "").strip()
-            dept_name = d.get("dept_name") or ""
-            for raw_author in auth_str.replace(";", ",").split(","):
-                a_clean = raw_author.strip()
-                if a_clean and len(a_clean) > 2 and a_clean.lower() not in ["va boshqalar", "et al", "—"]:
-                    if a_clean not in inst_authors:
-                        inst_authors[a_clean] = {"count": 0, "depts": set(), "cats": set()}
-                    inst_authors[a_clean]["count"] += 1
-                    if dept_name:
-                        inst_authors[a_clean]["depts"].add(dept_name)
-                    if d.get("category"):
-                        inst_authors[a_clean]["cats"].add(CATEGORY_LABELS.get(d["category"], d["category"]))
+    return f"""Siz ADTI (Andijon davlat tibbiyot instituti) ilmiy bo'limi bosh tahlilchisisiz.
 
-        sorted_authors = sorted(inst_authors.items(), key=lambda x: -x[1]["count"])
-        lines = []
-        for i, (author, info) in enumerate(sorted_authors[:15], 1):
-            d_name = next(iter(info["depts"])) if info["depts"] else "Kafedra"
-            lines.append(f"  {i}. {author} ({d_name}) — {info['count']} ta ish ({', '.join(list(info['cats'])[:2])})")
-        if lines:
-            authors_ranking_text = "\n".join(lines)
+Quyidagi barcha 65 ta kafedra ma'lumotlari asosida O'ZBEK TILIDA institut bo'yicha umumiy ilmiy-tahliliy hisobot yozing.
 
-    return f"""Siz ADTI (Andijon davlat tibbiyot instituti) ilmiy bo'limi tahlilchisisiz.
-
-Quyidagi ma'lumotlar asosida O'ZBEK TILIDA QISQA, LAKONIK, ANIQ va OPTIMAL tahlil hisobotini yozing.
-ORTIQCHA SUV VA UZUN GAPLAR BO'LMASIN. FAQAT ANIQ RAQAMLAR, ENG KO'P ISH TOPSHIRGAN KAFEDRALAR RO'YXATI, MUALLIFLAR VA XULOSALAR BO'LSIN.
-
-=== UMUMIY KO'RSATKICHLAR ===
+=== INSTITUTNING UMUMIY STATISTIKASI ===
 Jami kafedralar: {len(all_data)} ta
-Faol (ish topshirgan) kafedralar: {len(dept_stats)} ta
 Jami topshirilgan ilmiy ishlar: {total_all} ta
 
-=== ENG KO'P ISH TOPSHIRGAN KAFEDRALAR RO'YXATI (REYTING) ===
-{leaderboard_text}
+=== YO'NALISHLAR BO'YICHA UMUMIY NATIJALAR ===
+{cat_text}
 
-=== ENG FAOL MUALLIFLAR VA OLIMLAR (SHAFFOFLIK) ===
-{authors_ranking_text}
+=== TOP-5 YETAKCHI KAFEDRALAR ===
+{top5}
 
-=== ISH TOPSHIRMAGAN KAFEDRALAR ===
-{zero_depts_text}
+=== ENG KAM FAOL KAFEDRALAR ===
+{bot5}
 
-=== TALAB QILINADIGAN STRUKTURA (QISQA VA ANIQ) ===
-1. **Umumiy statistika** (1-2 gap: jami ishlar, faol kafedralar soni)
-2. **Eng ko'p ish topshirgan kafedralar ro'yxati (Reyting)** (Eng ko'p ish qo'shgan kafedralarning to'liq reytingi va topshirgan ishlari soni)
-3. **Eng faol mualliflar (Shaffoflik)** (Institutning eng ko'p ish topshirgan yetakchi mualliflari ism-shariflari)
-4. **Asosiy kamchiliklar va passiv kafedralar** (Ish topshirmagan yoki kam topshirgan kafedralar haqida qisqa)
-5. **Rahbariyat uchun takliflar va xulosa** (3-4 ta aniq punkt)
+=== TALAB QILINADIGAN TUZILMA ===
+Quyidagi 5 ta bo'lim bo'yicha rasmiy, ravon, ilmiy va tushunarli umumiy tahliliy matn yozing:
 
-Matn toza, lo'nda va professional bo'lsin.
+1. **Institutning umumiy ilmiy faoliyati** — 2026 yildagi umumiy ko'rsatkichlar, ilmiy dinamika va institutning umumiy ilmiy faolligi
+2. **Yetakchi kafedralar va asosiy yutuqlar** — TOP-5 yetakchi kafedralar faoliyati va ularning institut ilmiy salohiyatidagi hissasi
+3. **Mavjud muammolar va sust sohalar** — past ko'rsatkichga ega kafedralar, xalqaro nashrlar (Scopus/WoS) va patentlar yetishmasligi
+4. **Ilmiy yo'nalishlar bo'yicha tahlil** — Scopus/WoS maqolalari, dissertatsiyalar (DSc/PhD), patentlar, monografiyalar va xo'jalik shartnomalari holati
+5. **Strategik tavsiyalar va yakuniy xulosa** — institut ilmiy nufuzini yanada oshirish bo'yicha rahbariyatga amaliy tavsiyalar va yakuniy xulosa
 """
 
 
 async def generate_dept_analysis(dept_name: str, head_name: str,
                                   summary: dict, entries: list) -> str:
-    """Bitta kafedra uchun optimal AI tahlil matni."""
+    """Bitta kafedra uchun umumiy AI tahlil matni."""
     prompt = _build_dept_prompt(dept_name, head_name, summary, entries)
     return await _call_gemini(prompt)
 
 
 async def generate_full_analysis(all_data: list, detailed_entries: list = None) -> str:
-    """Barcha kafedralar bo'yicha optimal AI tahlil matni (kafedralar reytingi bilan)."""
+    """Barcha kafedralar bo'yicha umumiy institut AI tahlil matni."""
     prompt = _build_full_prompt(all_data, detailed_entries)
     return await _call_gemini(prompt)
