@@ -1313,6 +1313,7 @@ async def send_entry_file(cb: types.CallbackQuery):
 @dp.message(F.text.in_(["🏛 Сводный ҳисобот", "🏛 Сводный ҳисобот (65 кафедра)"]))
 async def admin_summary(message: types.Message):
     if message.from_user.id not in ADMIN_IDS:
+        await message.answer("⚠️ Ушбу функция фақат маъмурият (Admin) учун очиқ.")
         return
 
     rows = await get_all_summary()
@@ -1321,18 +1322,24 @@ async def admin_summary(message: types.Message):
 
     dept_lines = []
     for r in rows:
-        total_scopus += r['scopus_wos']
-        total_phd += r['phd']
-        total_dsc += r['dsc']
-        total_pat += r['patent']
-        total_all += r['total']
+        scopus = r.get('scopus_wos') or 0
+        phd = r.get('phd') or 0
+        dsc = r.get('dsc') or 0
+        pat = r.get('patent') or 0
+        tot = r.get('total') or 0
 
-        if r['total'] > 0:
+        total_scopus += scopus
+        total_phd += phd
+        total_dsc += dsc
+        total_pat += pat
+        total_all += tot
+
+        if tot > 0:
             active_depts += 1
-            name_short = r['name'][:32] + '…' if len(r['name']) > 32 else r['name']
+            name_short = r['name'][:35] + '…' if len(r['name']) > 35 else r['name']
             dept_lines.append(
                 f"<b>{r['id']}. {name_short}</b>\n"
-                f"   └ 🌐 Scopus: <b>{r['scopus_wos']}</b> | 💡 Патент: <b>{r['patent']}</b> | 🎓 DSc/PhD: <b>{r['dsc']}/{r['phd']}</b> | Жами: <b>{r['total']}</b>"
+                f"   └ 🌐 Scopus: <b>{scopus}</b> | 💡 Патент: <b>{pat}</b> | 🎓 DSc/PhD: <b>{dsc}/{phd}</b> | Жами: <b>{tot}</b>"
             )
 
     header = (
@@ -1346,16 +1353,30 @@ async def admin_summary(message: types.Message):
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📈 <b>ЖАМИ БАРЧА ЁЗУВЛАР: {total_all} та</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📋 <b>Кафедралар кесимида:</b>\n"
+        f"📋 <b>Кафедралар кесимида:</b>\n\n"
     )
 
     if not dept_lines:
-        text = header + "<i>Ҳозирча бирорта ҳам кафедра иш топширмаган.</i>"
-        await message.answer(text, parse_mode="HTML")
-    else:
-        text = header + "\n".join(dept_lines)
-        for i in range(0, len(text), 4000):
-            await message.answer(text[i:i+4000], parse_mode="HTML")
+        await message.answer(header + "<i>Ҳозирча бирорта ҳам кафедра иш топширмаган.</i>", parse_mode="HTML")
+        return
+
+    chunks = []
+    curr = header
+    for line in dept_lines:
+        if len(curr) + len(line) + 2 > 3500:
+            chunks.append(curr.strip())
+            curr = line + "\n\n"
+        else:
+            curr += line + "\n\n"
+    if curr.strip():
+        chunks.append(curr.strip())
+
+    for chunk in chunks:
+        try:
+            await message.answer(chunk, parse_mode="HTML")
+        except Exception:
+            await message.answer(chunk)
+        await asyncio.sleep(0.2)
 
 
 # ─── ADMIN: СКАЧАТЬ ZIP АРХИВ ВСЕХ ФАЙЛОВ ПО ПАПКАМ ──────────────────────
