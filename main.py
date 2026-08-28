@@ -953,7 +953,7 @@ async def my_stats(message: types.Message, state: FSMContext):
         return
 
     summary = await get_dept_summary(dept['id'])
-    entries = await get_dept_entries(dept['id'], limit=50)
+    entries = await get_dept_entries(dept['id'], limit=500)
 
     lines = [
         f"📊 <b>КАФЕДРА СТАТИСТИКАСИ</b>\n"
@@ -987,10 +987,22 @@ async def my_stats(message: types.Message, state: FSMContext):
     if author_counts:
         top_auth = sorted(author_counts.items(), key=lambda x: -x[1])
         lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n👥 <b>Иш топширган муаллифлар (шаффофлик):</b>")
-        for a_name, cnt in top_auth[:10]:
+        for a_name, cnt in top_auth:
             lines.append(f"  • <b>{a_name}</b> — {cnt} та иш")
-
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    # Отправка с разбивкой на части (лимит Telegram = 4096 символов)
+    full_text = "\n".join(lines)
+    if len(full_text) <= 4096:
+        await message.answer(full_text, parse_mode="HTML")
+    else:
+        chunk = ""
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 4000:
+                await message.answer(chunk, parse_mode="HTML")
+                chunk = line + "\n"
+            else:
+                chunk += line + "\n"
+        if chunk.strip():
+            await message.answer(chunk, parse_mode="HTML")
 
 
 # ─── ПРОСМОТР И УДАЛЕНИЕ СВОИХ ЗАПИСЕЙ ──────────────────────────────────────
