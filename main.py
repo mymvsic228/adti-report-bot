@@ -977,12 +977,25 @@ async def my_stats(message: types.Message, state: FSMContext):
 
     # Муаллифлар рўйхати (шаффофлик учун)
     author_counts = {}
+    SKIP_AUTHORS = {"va boshqalar", "et al", "—", "и др", "and others", "бошқалар"}
     for e in entries:
         auth_str = (e.get('authors') or '').strip()
         for a in auth_str.replace(";", ",").split(","):
             ac = a.strip()
-            if ac and len(ac) > 2 and ac.lower() not in ["va boshqalar", "et al", "—"]:
-                author_counts[ac] = author_counts.get(ac, 0) + 1
+            # Фильтр: минимум 3 символа, максимум 80 (ФИО не длиннее)
+            # Исключаем: явные не-имена (числа, заголовки статей, аббревиатуры без пробелов)
+            if not ac or len(ac) < 3 or len(ac) > 80:
+                continue
+            if ac.lower() in SKIP_AUTHORS:
+                continue
+            # Если слов больше 6 — скорее всего это название статьи, не ФИО
+            word_count = len(ac.split())
+            if word_count > 6:
+                continue
+            # Если строка полностью из заглавных букв и длиннее 30 символов — заголовок
+            if ac == ac.upper() and len(ac) > 30:
+                continue
+            author_counts[ac] = author_counts.get(ac, 0) + 1
 
     if author_counts:
         top_auth = sorted(author_counts.items(), key=lambda x: -x[1])
