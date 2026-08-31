@@ -452,9 +452,116 @@ async def cmd_start(message: types.Message, state: FSMContext):
         await state.set_state(AuthState.waiting_for_code)
 
 
+# ─── CANCEL & MENU INTERCEPTOR ──────────────────────────────────────────────
+CANCEL_WORDS = {
+    "❌ бекор қилиш", "бекор қилиш", "бекор килиш", "bekor qilish",
+    "отмена", "отменить", "назад", "/cancel", "cancel", "стоп", "stop"
+}
+
+def is_cancel_text(text: str) -> bool:
+    if not text:
+        return False
+    return text.strip().lower() in CANCEL_WORDS
+
+
+@dp.message(Command("cancel"))
+@dp.message(F.text.lower().in_(CANCEL_WORDS))
+async def global_cancel_handler(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "❌ <b>Амал бекор қилинди.</b>\n\nАсосий меню 👇",
+        reply_markup=main_kb(message.from_user.id),
+        parse_mode="HTML"
+    )
+
+
+async def check_menu_or_cancel(message: types.Message, state: FSMContext) -> bool:
+    """Текширади: агар фойдаланувчи бекор қилиш ёки меню тугмасини босган бўлса"""
+    text = (message.text or "").strip()
+    if not text:
+        return False
+
+    if is_cancel_text(text):
+        await state.clear()
+        await message.answer(
+            "❌ <b>Амал бекор қилинди.</b>\n\nАсосий меню 👇",
+            reply_markup=main_kb(message.from_user.id),
+            parse_mode="HTML"
+        )
+        return True
+
+    if text.startswith("/start"):
+        await state.clear()
+        await cmd_start(message, state)
+        return True
+
+    if text in ["🚪 Кафедрадан чиқиш", "🚪 Чиқиш"]:
+        await logout_dept(message, state)
+        return True
+
+    if text in ["➕ Ҳисобот қўшиш", "📁 Ҳисобот қўшиш"]:
+        await add_report_start(message, state)
+        return True
+
+    if text in ["📊 Кафедра статистикаси", "📊 Кафедрам статистикаси"]:
+        await state.clear()
+        await my_stats(message, state)
+        return True
+
+    if text in ["📋 Юборилган ишлар", "📋 Юборилган ишлар (Ўчириш)"]:
+        await state.clear()
+        await list_dept_submissions(message)
+        return True
+
+    if text in ["🗂 Файллар базаси", "🗂 Файлларни кўриш (категория)"]:
+        await state.clear()
+        await browse_by_category_start(message)
+        return True
+
+    if text in ["🏛 Сводный ҳисобот", "🏛 Сводный ҳисобот (65 кафедра)"]:
+        await state.clear()
+        await all_stats(message, state)
+        return True
+
+    if text in ["📊 Excel ҳисобот (.xlsx)", "📊 Excel ҳисобот юклаш (.xlsx)"]:
+        await state.clear()
+        await send_excel_report(message, state)
+        return True
+
+    if text in ["📥 Word ҳисобот (.docx)", "📥 Word ҳисобот юклаш"]:
+        await state.clear()
+        await send_word_report(message, state)
+        return True
+
+    if text in ["📦 Файллар ZIP архиви", "📦 Файллар ZIP архиви (.zip)"]:
+        await state.clear()
+        await send_zip_archive(message, state)
+        return True
+
+    if text in ["🔑 Кафедралар пароллари", "🔑 Кафедралар пароллари (Word)"]:
+        await state.clear()
+        await send_codes_word(message, state)
+        return True
+
+    if text in ["🤖 AI Сводный таҳлил", "🤖 AI Институт таҳлили", "/ai_summary"]:
+        await state.clear()
+        await ai_summary_cmd(message, state)
+        return True
+
+    if text in ["🤖 AI Илмий таҳлил", "🤖 AI Кафедра таҳлили", "/ai_dept"]:
+        await state.clear()
+        await ai_dept_cmd(message, state)
+        return True
+
+    return False
+
+
 # ─── АВТОРИЗАЦИЯ ПО КОДУ ────────────────────────────────────────────────────
 @dp.message(AuthState.waiting_for_code, F.text)
 async def process_dept_code(message: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(message, state):
+        return
+
     code_input = message.text.strip()
     dept = await get_dept_by_code(code_input)
 
@@ -567,6 +674,9 @@ async def choose_category(cb: types.CallbackQuery, state: FSMContext):
 # ─── ШАГ 2 — НАЗВАНИЕ ────────────────────────────────────────────────────────
 @dp.message(AddEntry.enter_title, F.text)
 async def enter_title(message: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(message, state):
+        return
+
     await state.update_data(title=message.text.strip())
     data = await state.get_data()
     cat = data.get('category', '')
@@ -629,12 +739,18 @@ async def go_to_next_extra_step(message: types.Message, state: FSMContext):
 # ─── УНИВЕРСАЛЬНЫЙ ОБРАБОТЧИК ДОП-ШАГОВ ────────────────────────────────────
 async def handle_extra_step(message: types.Message, state: FSMContext, field_key: str):
     """Сохраняет значение текущего доп-шага и переходит к следующему."""
+    if await check_menu_or_cancel(message, state):
+        return
+
     await state.update_data(**{field_key: message.text.strip()})
     await go_to_next_extra_step(message, state)
 
 
 @dp.message(AddEntry.enter_country, F.text)
 async def step_country(msg: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(msg, state):
+        return
+
     data = await state.get_data()
     if data.get('category') == 'patent':
         await state.update_data(country=msg.text.strip())
@@ -653,6 +769,9 @@ async def step_journal(msg: types.Message, state: FSMContext):
 
 @dp.message(AddEntry.enter_pub_date, F.text)
 async def step_pub_date(msg: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(msg, state):
+        return
+
     data = await state.get_data()
     if data.get('category') == 'patent':
         await state.update_data(pub_date=msg.text.strip())
@@ -697,6 +816,9 @@ async def step_amount(msg: types.Message, state: FSMContext):
 # ─── ШАГ 3 — АВТОРЫ ──────────────────────────────────────────────────────────
 @dp.message(AddEntry.enter_authors, F.text)
 async def enter_authors(message: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(message, state):
+        return
+
     await state.update_data(authors=message.text.strip(), extra_step_index=0)
     await go_to_next_extra_step(message, state)
 
@@ -759,9 +881,18 @@ async def skip_file(cb: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "cancel")
 async def cancel_action(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await cb.message.edit_text("❌ Бекор қилинди.")
-    await cb.message.answer("Асосий меню 👇", reply_markup=main_kb(cb.from_user.id))
-    await cb.answer()
+    try:
+        await cb.message.edit_text("❌ <b>Амал бекор қилинди.</b>", parse_mode="HTML")
+    except Exception:
+        try:
+            await cb.message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+    await cb.message.answer("Асосий меню 👇", reply_markup=main_kb(cb.from_user.id), parse_mode="HTML")
+    try:
+        await cb.answer("Бекор қилинди")
+    except Exception:
+        pass
 
 
 # ─── СОХРАНЕНИЕ ЗАПИСИ ──────────────────────────────────────────────────────
@@ -1779,6 +1910,9 @@ async def prompt_admin_pin_for_passwords(message: types.Message, state: FSMConte
 
 @dp.message(AdminPinState.waiting_for_pin, F.text)
 async def process_admin_pin(message: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(message, state):
+        return
+
     if message.from_user.id not in ADMIN_IDS:
         await state.clear()
         return
