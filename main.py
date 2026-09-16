@@ -839,11 +839,20 @@ async def receive_doc(message: types.Message, state: FSMContext):
 
     dept_dir = FILES_DIR / str(dept_id)
     dept_dir.mkdir(parents=True, exist_ok=True)
-    dest = dept_dir / fname
+    clean_name = re.sub(r'[^\w\.\-\_ ]', '_', fname)
+    dest = dept_dir / clean_name
 
-    file_obj = await bot.get_file(file_id)
-    await bot.download_file(file_obj.file_path, destination=str(dest))
-    await save_entry(message, state, file_path=str(dest), file_id=file_id)
+    dest_str = ""
+    try:
+        if not f.file_size or f.file_size < 20 * 1024 * 1024:
+            file_obj = await bot.get_file(file_id)
+            await bot.download_file(file_obj.file_path, destination=str(dest))
+            dest_str = str(dest)
+    except Exception as e_dl:
+        logger.warning(f"Could not download doc locally: {e_dl}")
+        dest_str = ""
+
+    await save_entry(message, state, file_path=dest_str, file_id=file_id)
 
 
 # ─── ШАГ 4 — ФАЙЛ (фото) ─────────────────────────────────────────────────────
@@ -864,9 +873,16 @@ async def receive_photo(message: types.Message, state: FSMContext):
     dept_dir.mkdir(parents=True, exist_ok=True)
     dest = dept_dir / fname
 
-    file_obj = await bot.get_file(file_id)
-    await bot.download_file(file_obj.file_path, destination=str(dest))
-    await save_entry(message, state, file_path=str(dest), file_id=file_id)
+    dest_str = ""
+    try:
+        file_obj = await bot.get_file(file_id)
+        await bot.download_file(file_obj.file_path, destination=str(dest))
+        dest_str = str(dest)
+    except Exception as e_dl:
+        logger.warning(f"Could not download photo locally: {e_dl}")
+        dest_str = ""
+
+    await save_entry(message, state, file_path=dest_str, file_id=file_id)
 
 
 # ─── ШАГ 4 — ПРОПУСТИТЬ ФАЙЛ ─────────────────────────────────────────────────
@@ -1466,22 +1482,37 @@ async def send_entry_file(cb: types.CallbackQuery):
 
     try:
         await cb.answer("⏳ Файл юборилмоқда...")
+        import html
+        raw_title = row.get('title') or 'Ҳужжат'
+        safe_title = html.escape(raw_title)[:300]
         await bot.send_document(
             cb.message.chat.id,
             row['file_id'],
-            caption=f"📎 <b>{row['title'] or 'Ҳужжат'}</b>\n<i>ID: #{entry_id}</i>",
+            caption=f"📎 <b>{safe_title}</b>\n<i>ID: #{entry_id}</i>",
             parse_mode="HTML"
         )
-    except Exception:
+    except Exception as e_doc:
         try:
+            import html
+            raw_title = row.get('title') or 'Скан'
+            safe_title = html.escape(raw_title)[:300]
             await bot.send_photo(
                 cb.message.chat.id,
                 row['file_id'],
-                caption=f"📎 <b>{row['title'] or 'Скан'}</b>\n<i>ID: #{entry_id}</i>",
+                caption=f"📎 <b>{safe_title}</b>\n<i>ID: #{entry_id}</i>",
                 parse_mode="HTML"
             )
-        except Exception as e:
-            await cb.message.answer(f"❌ Файлни юборишда хатолик: {e}")
+        except Exception as e_photo:
+            try:
+                # Plain text fallback without parse_mode
+                plain_title = (row.get('title') or 'Ҳужжат')[:300]
+                await bot.send_document(
+                    cb.message.chat.id,
+                    row['file_id'],
+                    caption=f"📎 {plain_title}\nID: #{entry_id}"
+                )
+            except Exception as e:
+                await cb.message.answer(f"❌ Файлни юборишда хатолик: {e}")
 
 
 # ─── ADMIN: СВОДНАЯ ТАБЛИЦА ─────────────────────────────────────────────────
@@ -1612,20 +1643,18 @@ async def process_zip_download(cb: types.CallbackQuery):
         await cb.answer()
         return
 
-    MAX_SIZE = 45 * 1024 * 1024  # 45 MB — Telegram лимити 50 МБ, запас 5 МБ
+    BATCH_SIZE = 30
+    total_files = len(entries)
 
     try:
-        buf, file_count = await generate_files_zip(bot, entries)
+        if total_files <= BATCH_SIZE:
+            # Малый объём — один общий ZIP
+            buf, file_count = await generate_files_zip(bot, entries)
+            if file_count == 0:
+                await cb.message.edit_text("📭 Файлларни юклаб бўлмади ёки улар бўш.", parse_mode="HTML")
+                await cb.answer()
+                return
 
-        if file_count == 0:
-            await cb.message.edit_text("📭 Файлларни юклаб бўлмади ёки улар бўш.", parse_mode="HTML")
-            await cb.answer()
-            return
-
-        zip_size = buf.getbuffer().nbytes
-
-        if zip_size <= MAX_SIZE:
-            # ── Обычная отправка — влезает в лимит ──
             await bot.send_document(
                 cb.message.chat.id,
                 types.BufferedInputFile(buf.getvalue(), filename=zip_name),
@@ -1636,45 +1665,49 @@ async def process_zip_download(cb: types.CallbackQuery):
                         f"📂 Барча файллар папкаларга чиройли тартибланган!",
                 parse_mode="HTML"
             )
-            await cb.message.delete()
+            try:
+                await cb.message.delete()
+            except Exception:
+                pass
         else:
-            # ── ZIP слишком большой — автоматически делим по группам кафедр ──
-            # Группы: 1-20, 21-40, 41-65
-            dept_groups = [(1, 20), (21, 40), (41, 65)]
+            # Большой объём — делим на надёжные части по 30 файлов (всегда < 45 МБ)
+            chunks = [entries[i:i + BATCH_SIZE] for i in range(0, total_files, BATCH_SIZE)]
+            total_parts = len(chunks)
             await cb.message.edit_text(
-                f"⚠️ <b>ZIP архив жуда катта ({zip_size // (1024*1024)} МБ).</b>\n"
-                f"Кафедралар гуруҳлари бўйича <b>{len(dept_groups)} та</b> алоҳида архивга бўлиб юборилади...\n"
-                f"<i>Илтимос, кутинг.</i>",
+                f"📦 <b>{label_info}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📊 Жами файллар: <b>{total_files} та</b>.\n"
+                f"⚠️ Telegram 50 МБ лимитидан ошмаслиги учун <b>{total_parts} та қисм</b>га бўлиб юборилмоқда...\n"
+                f"<i>Илтимос, кутинг...</i>",
                 parse_mode="HTML"
             )
 
             sent_parts = 0
-            for start_dept, end_dept in dept_groups:
-                part_entries = [e for e in entries if start_dept <= e['dept_id'] <= end_dept]
-                if not part_entries:
-                    continue
-
-                part_buf, part_count = await generate_files_zip(bot, part_entries)
+            for idx, chunk in enumerate(chunks, 1):
+                part_buf, part_count = await generate_files_zip(bot, chunk)
                 if part_count == 0:
                     continue
 
-                part_name = f"ADTI_2026_{zip_name.replace('.zip', '')}_Kaf{start_dept:02d}-{end_dept:02d}.zip"
+                part_base = zip_name.replace('.zip', '')
+                part_filename = f"{part_base}_Part_{idx:02d}_of_{total_parts:02d}.zip"
                 sent_parts += 1
+
                 await bot.send_document(
                     cb.message.chat.id,
-                    types.BufferedInputFile(part_buf.getvalue(), filename=part_name),
+                    types.BufferedInputFile(part_buf.getvalue(), filename=part_filename),
                     caption=f"📦 <b>{label_info}</b>\n"
                             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🏫 Кафедралар: <b>{start_dept}–{end_dept}</b>\n"
-                            f"📁 Файллар: <b>{part_count} та</b>",
+                            f"📑 Қисм: <b>{idx}/{total_parts}</b>\n"
+                            f"📁 Файллар сони: <b>{part_count} та</b>",
                     parse_mode="HTML"
                 )
+                await asyncio.sleep(0.3)
 
             if sent_parts == 0:
                 await cb.message.edit_text("📭 Файлларни юклаб бўлмади.", parse_mode="HTML")
             else:
                 await cb.message.edit_text(
-                    f"✅ <b>Барча файллар {sent_parts} та қисмга бўлиниб юборилди!</b>\n"
+                    f"✅ <b>Барча {sent_parts} та ZIP қисм муваффақиятли юборилди!</b>\n"
                     f"📌 Бўлим: <b>{label_info}</b>",
                     parse_mode="HTML"
                 )
