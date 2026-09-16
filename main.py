@@ -26,7 +26,7 @@ from database import (
 )
 from report_gen import (
     generate_report_docx, generate_codes_docx, generate_report_excel,
-    generate_files_zip
+    generate_files_zip, stream_files_zip
 )
 from ai_analysis import generate_dept_analysis, generate_full_analysis
 from scopus_verifier import verify_article
@@ -1643,76 +1643,51 @@ async def process_zip_download(cb: types.CallbackQuery):
         await cb.answer()
         return
 
-    BATCH_SIZE = 30
     total_files = len(entries)
+    sent_parts = 0
+    total_files_sent = 0
 
     try:
-        if total_files <= BATCH_SIZE:
-            # Малый объём — один общий ZIP
-            buf, file_count = await generate_files_zip(bot, entries)
-            if file_count == 0:
-                await cb.message.edit_text("📭 Файлларни юклаб бўлмади ёки улар бўш.", parse_mode="HTML")
-                await cb.answer()
-                return
+        async for part_buf, part_count in stream_files_zip(bot, entries, max_zip_bytes=35 * 1024 * 1024):
+            sent_parts += 1
+            total_files_sent += part_count
+            part_size_mb = part_buf.getbuffer().nbytes / (1024 * 1024)
+
+            part_base = zip_name.replace('.zip', '')
+            part_filename = f"{part_base}_Part_{sent_parts:02d}.zip"
 
             await bot.send_document(
                 cb.message.chat.id,
-                types.BufferedInputFile(buf.getvalue(), filename=zip_name),
-                caption=f"✅ <b>АДТИ 2026 — Файллар архиви (.zip)</b>\n"
+                types.BufferedInputFile(part_buf.getvalue(), filename=part_filename),
+                caption=f"📦 <b>{label_info}</b>\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"📌 Бўлим: <b>{label_info}</b>\n"
-                        f"📁 Жами архивланган файллар: <b>{file_count} та</b>\n"
-                        f"📂 Барча файллар папкаларга чиройли тартибланган!",
+                        f"📑 Қисм: <b>{sent_parts}</b>\n"
+                        f"📁 Файллар сони: <b>{part_count} та</b>\n"
+                        f"💾 Ҳажми: <b>{part_size_mb:.1f} МБ</b>",
                 parse_mode="HTML"
             )
-            try:
-                await cb.message.delete()
-            except Exception:
-                pass
-        else:
-            # Большой объём — делим на надёжные части по 30 файлов (всегда < 45 МБ)
-            chunks = [entries[i:i + BATCH_SIZE] for i in range(0, total_files, BATCH_SIZE)]
-            total_parts = len(chunks)
+            part_buf.close()
+            await asyncio.sleep(0.3)
+
+        if sent_parts == 0:
+            await cb.message.edit_text("📭 Файлларни юклаб бўлмади ёки улар топилмади.", parse_mode="HTML")
+        elif sent_parts == 1:
             await cb.message.edit_text(
-                f"📦 <b>{label_info}</b>\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📊 Жами файллар: <b>{total_files} та</b>.\n"
-                f"⚠️ Telegram 50 МБ лимитидан ошмаслиги учун <b>{total_parts} та қисм</b>га бўлиб юборилмоқда...\n"
-                f"<i>Илтимос, кутинг...</i>",
+                f"✅ <b>Архив муваффақиятли юборилди!</b>\n"
+                f"📌 Бўлим: <b>{label_info}</b>\n"
+                f"📁 Жами архивланган файллар: <b>{total_files_sent} та</b>",
                 parse_mode="HTML"
             )
-
-            sent_parts = 0
-            for idx, chunk in enumerate(chunks, 1):
-                part_buf, part_count = await generate_files_zip(bot, chunk)
-                if part_count == 0:
-                    continue
-
-                part_base = zip_name.replace('.zip', '')
-                part_filename = f"{part_base}_Part_{idx:02d}_of_{total_parts:02d}.zip"
-                sent_parts += 1
-
-                await bot.send_document(
-                    cb.message.chat.id,
-                    types.BufferedInputFile(part_buf.getvalue(), filename=part_filename),
-                    caption=f"📦 <b>{label_info}</b>\n"
-                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"📑 Қисм: <b>{idx}/{total_parts}</b>\n"
-                            f"📁 Файллар сони: <b>{part_count} та</b>",
-                    parse_mode="HTML"
-                )
-                await asyncio.sleep(0.3)
-
-            if sent_parts == 0:
-                await cb.message.edit_text("📭 Файлларни юклаб бўлмади.", parse_mode="HTML")
-            else:
-                await cb.message.edit_text(
-                    f"✅ <b>Барча {sent_parts} та ZIP қисм муваффақиятли юборилди!</b>\n"
-                    f"📌 Бўлим: <b>{label_info}</b>",
-                    parse_mode="HTML"
-                )
+        else:
+            await cb.message.edit_text(
+                f"✅ <b>Барча {sent_parts} та ZIP қисм муваффақиятли юборилди!</b>\n"
+                f"📌 Бўлим: <b>{label_info}</b>\n"
+                f"📁 Жами архивланган файллар: <b>{total_files_sent} та</b>",
+                parse_mode="HTML"
+            )
 
     except Exception as e:
+        logger.error(f"Error in process_zip_download: {e}")
         await cb.message.edit_text(f"❌ ZIP архив яратишда хатолик: {e}", parse_mode="HTML")
 
     await cb.answer()
