@@ -596,31 +596,66 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
             return None
 
 
-async def generate_files_zip(bot, entries: list) -> tuple[io.BytesIO, int]:
+async def stream_files_zip(bot, entries: list, max_zip_bytes: int = 35 * 1024 * 1024):
     """
-    Скачивает файлы из Telegram параллельно (до 6 потоков) 
-    и упаковывает их в ZIP-архив.
-    Возвращает (io.BytesIO, count_files).
+    Скачивает файлы параллельно пачками и генерирует ZIP-архивы,
+    где каждый архив строго не превышает max_zip_bytes (35 МБ),
+    что исключает ошибку Telegram 'Request Entity Too Large' (лимит 50 МБ).
+    Yields: (io.BytesIO, int count_files)
     """
     import zipfile
 
-    buf = io.BytesIO()
-    count = 0
+    if not entries:
+        return
+
     sem = asyncio.Semaphore(6)
+    BATCH_DOWNLOAD_SIZE = 12
 
-    # Параллельно скачиваем файлы
-    tasks = [fetch_file_content(bot, e, sem) for e in entries]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+    current_buf = io.BytesIO()
+    current_zf = zipfile.ZipFile(current_buf, "w", compression=zipfile.ZIP_DEFLATED)
+    current_count = 0
 
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    for i in range(0, len(entries), BATCH_DOWNLOAD_SIZE):
+        batch = entries[i:i + BATCH_DOWNLOAD_SIZE]
+        tasks = [fetch_file_content(bot, e, sem) for e in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
         for res in results:
-            if isinstance(res, tuple) and res is not None:
-                zip_path, content = res
-                zf.writestr(zip_path, content)
-                count += 1
+            if not isinstance(res, tuple) or res is None:
+                continue
+            zip_path, content = res
+            if not content:
+                continue
 
-    buf.seek(0)
-    return buf, count
+            # Если добавление файла превысит 35 МБ, запечатываем текущий архив и отдаём
+            if (current_buf.tell() + len(content)) > max_zip_bytes and current_count > 0:
+                current_zf.close()
+                current_buf.seek(0)
+                yield current_buf, current_count
+
+                # Начинаем новый архив
+                current_buf = io.BytesIO()
+                current_zf = zipfile.ZipFile(current_buf, "w", compression=zipfile.ZIP_DEFLATED)
+                current_count = 0
+
+            current_zf.writestr(zip_path, content)
+            current_count += 1
+
+    if current_count > 0:
+        current_zf.close()
+        current_buf.seek(0)
+        yield current_buf, current_count
+    else:
+        current_zf.close()
+
+
+async def generate_files_zip(bot, entries: list) -> tuple[io.BytesIO, int]:
+    """
+    Возвращает первый архив из stream_files_zip.
+    """
+    async for buf, count in stream_files_zip(bot, entries):
+        return buf, count
+    return io.BytesIO(), 0
 
 
 
