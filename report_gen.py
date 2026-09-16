@@ -1,7 +1,12 @@
 import io
+import asyncio
+import logging
+from pathlib import Path
 from docx import Document
 from docx.shared import Pt
 from database import INDICATORS, INDICATOR_KEYS
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -> io.BytesIO:
@@ -556,56 +561,66 @@ def sanitize_filename(text: str, max_len: int = 50) -> str:
     return clean[:max_len]
 
 
+async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
+    file_id = entry.get('file_id')
+    if not file_id:
+        return None
+    async with sem:
+        try:
+            tg_file = await bot.get_file(file_id)
+            if tg_file.file_size and tg_file.file_size > 20 * 1024 * 1024:
+                return None
+            f_stream = await bot.download_file(tg_file.file_path)
+            if hasattr(f_stream, 'getvalue'):
+                content = f_stream.getvalue()
+            elif hasattr(f_stream, 'read'):
+                if hasattr(f_stream, 'seek'):
+                    f_stream.seek(0)
+                content = f_stream.read()
+            else:
+                content = bytes(f_stream)
+
+            ext = Path(tg_file.file_path).suffix or ".pdf"
+            if not ext.startswith("."):
+                ext = "." + ext
+
+            cat_folder = CATEGORY_FOLDERS.get(entry.get('category'), entry.get('category', 'other'))
+            dept_id = entry.get('dept_id', 0)
+            author = sanitize_filename(entry.get('authors') or '', 25)
+            title = sanitize_filename(entry.get('title') or '', 35)
+
+            zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry['id']}{ext}"
+            return (zip_path, content)
+        except Exception as ex:
+            logger.warning(f"Failed to fetch file for entry #{entry.get('id')}: {ex}")
+            return None
+
+
 async def generate_files_zip(bot, entries: list) -> tuple[io.BytesIO, int]:
     """
-    Скачивает файлы из Telegram и упаковывает их в ZIP-архив,
-    разложенный по папкам категорий и кафедр.
+    Скачивает файлы из Telegram параллельно (до 6 потоков) 
+    и упаковывает их в ZIP-архив.
     Возвращает (io.BytesIO, count_files).
     """
     import zipfile
-    from pathlib import Path
 
     buf = io.BytesIO()
     count = 0
+    sem = asyncio.Semaphore(6)
+
+    # Параллельно скачиваем файлы
+    tasks = [fetch_file_content(bot, e, sem) for e in entries]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for e in entries:
-            file_id = e['file_id']
-            if not file_id:
-                continue
-
-            try:
-                # Скачиваем файл из серверов Telegram
-                tg_file = await bot.get_file(file_id)
-                f_stream = await bot.download_file(tg_file.file_path)
-                
-                if hasattr(f_stream, 'getvalue'):
-                    content = f_stream.getvalue()
-                elif hasattr(f_stream, 'read'):
-                    if hasattr(f_stream, 'seek'):
-                        f_stream.seek(0)
-                    content = f_stream.read()
-                else:
-                    content = bytes(f_stream)
-
-                ext = Path(tg_file.file_path).suffix or ".pdf"
-                if not ext.startswith("."):
-                    ext = "." + ext
-
-                cat_folder = CATEGORY_FOLDERS.get(e['category'], e['category'])
-                dept_id = e['dept_id']
-                author = sanitize_filename(e['authors'], 25)
-                title = sanitize_filename(e['title'], 35)
-
-                # Пример имени: 01_Scopus_va_Web_of_Science/[Kaf_02]_Uzbekova_Digital_therapeutics_id12.pdf
-                zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{e['id']}{ext}"
+        for res in results:
+            if isinstance(res, tuple) and res is not None:
+                zip_path, content = res
                 zf.writestr(zip_path, content)
                 count += 1
-            except Exception as ex:
-                print(f"Failed to fetch file for entry #{e['id']}: {ex}")
-                continue
 
     buf.seek(0)
     return buf, count
+
 
 
