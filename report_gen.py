@@ -563,13 +563,37 @@ def sanitize_filename(text: str, max_len: int = 50) -> str:
 
 async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
     file_id = entry.get('file_id')
+    cat_folder = CATEGORY_FOLDERS.get(entry.get('category'), entry.get('category', 'other'))
+    dept_id = entry.get('dept_id', 0)
+    author = sanitize_filename(entry.get('authors') or '', 25)
+    title = sanitize_filename(entry.get('title') or '', 35)
+    entry_id = entry.get('id', 0)
+
+    def make_stub(reason: str):
+        """Возвращает текстовый файл-заглушку с объяснением"""
+        stub_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry_id}_YUKLAB_OLINMADI.txt"
+        stub_text = (
+            f"Fayl yuklab olinmadi.\n"
+            f"Sababi: {reason}\n\n"
+            f"Maqola: {entry.get('title', '')}\n"
+            f"Mualliflar: {entry.get('authors', '')}\n"
+            f"Kafedra ID: {dept_id}\n"
+            f"Yozuv ID: #{entry_id}\n"
+        ).encode('utf-8')
+        return (stub_path, stub_text)
+
     if not file_id:
         return None
+
     async with sem:
         try:
             tg_file = await bot.get_file(file_id)
+
+            # Telegram Bot API чекловидан катта файлларни (>20 МБ) юклаб бўлмайди
             if tg_file.file_size and tg_file.file_size > 20 * 1024 * 1024:
-                return None
+                size_mb = tg_file.file_size // (1024 * 1024)
+                return make_stub(f"Fayl hajmi {size_mb} MB > 20 MB (Telegram API cheklovi)")
+
             f_stream = await bot.download_file(tg_file.file_path)
             if hasattr(f_stream, 'getvalue'):
                 content = f_stream.getvalue()
@@ -580,20 +604,20 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
             else:
                 content = bytes(f_stream)
 
+            if not content:
+                return make_stub("Yuklab olingan kontent bo'sh")
+
             ext = Path(tg_file.file_path).suffix or ".pdf"
             if not ext.startswith("."):
                 ext = "." + ext
 
-            cat_folder = CATEGORY_FOLDERS.get(entry.get('category'), entry.get('category', 'other'))
-            dept_id = entry.get('dept_id', 0)
-            author = sanitize_filename(entry.get('authors') or '', 25)
-            title = sanitize_filename(entry.get('title') or '', 35)
-
-            zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry['id']}{ext}"
+            zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry_id}{ext}"
             return (zip_path, content)
+
         except Exception as ex:
-            logger.warning(f"Failed to fetch file for entry #{entry.get('id')}: {ex}")
-            return None
+            logger.warning(f"Failed to fetch file for entry #{entry_id}: {ex}")
+            return make_stub(f"Yuklashda xatolik: {str(ex)[:120]}")
+
 
 
 async def stream_files_zip(bot, entries: list, max_zip_bytes: int = 35 * 1024 * 1024):
