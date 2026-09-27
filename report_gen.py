@@ -570,7 +570,6 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
     entry_id = entry.get('id', 0)
 
     def make_stub(reason: str):
-        """Возвращает текстовый файл-заглушку с объяснением"""
         stub_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry_id}_YUKLAB_OLINMADI.txt"
         stub_text = (
             f"Fayl yuklab olinmadi.\n"
@@ -586,39 +585,59 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
         return None
 
     async with sem:
-        try:
-            tg_file = await bot.get_file(file_id)
+        last_error = "Noma'lum xato"
+        for attempt in range(1, 4):  # 3 urinish
+            try:
+                tg_file = await bot.get_file(file_id)
 
-            # Telegram Bot API чекловидан катта файлларни (>20 МБ) юклаб бўлмайди
-            if tg_file.file_size and tg_file.file_size > 20 * 1024 * 1024:
-                size_mb = tg_file.file_size // (1024 * 1024)
-                return make_stub(f"Fayl hajmi {size_mb} MB > 20 MB (Telegram API cheklovi)")
+                if tg_file.file_size and tg_file.file_size > 20 * 1024 * 1024:
+                    size_mb = tg_file.file_size // (1024 * 1024)
+                    return make_stub(f"Fayl hajmi {size_mb} MB > 20 MB (Telegram API cheklovi)")
 
-            f_stream = await bot.download_file(tg_file.file_path)
-            if hasattr(f_stream, 'getvalue'):
-                content = f_stream.getvalue()
-            elif hasattr(f_stream, 'read'):
-                if hasattr(f_stream, 'seek'):
-                    f_stream.seek(0)
-                content = f_stream.read()
-            else:
-                content = bytes(f_stream)
+                f_stream = await bot.download_file(tg_file.file_path)
+                if hasattr(f_stream, 'getvalue'):
+                    content = f_stream.getvalue()
+                elif hasattr(f_stream, 'read'):
+                    if hasattr(f_stream, 'seek'):
+                        f_stream.seek(0)
+                    content = f_stream.read()
+                else:
+                    content = bytes(f_stream)
 
-            if not content:
-                return make_stub("Yuklab olingan kontent bo'sh")
+                if not content:
+                    last_error = "Yuklab olingan kontent bo'sh"
+                    await asyncio.sleep(1.5 * attempt)
+                    continue
 
-            ext = Path(tg_file.file_path).suffix or ".pdf"
-            if not ext.startswith("."):
-                ext = "." + ext
+                ext = Path(tg_file.file_path).suffix.lower() or ".pdf"
+                if not ext.startswith("."):
+                    ext = "." + ext
 
-            zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry_id}{ext}"
-            return (zip_path, content)
+                # PDF fayllar uchun magic bytes tekshiruvi
+                if ext == ".pdf":
+                    if not content.startswith(b'%PDF'):
+                        last_error = (
+                            f"PDF sarlavhasi topilmadi (fayl buzilgan, "
+                            f"boshlanishi: {content[:8].hex()}, urinish {attempt}/3)"
+                        )
+                        logger.warning(f"Entry #{entry_id}: {last_error}")
+                        await asyncio.sleep(1.5 * attempt)
+                        continue
+                    if len(content) < 100:
+                        last_error = f"PDF hajmi juda kichik ({len(content)} bayt)"
+                        await asyncio.sleep(1)
+                        continue
 
-        except Exception as ex:
-            logger.warning(f"Failed to fetch file for entry #{entry_id}: {ex}")
-            return make_stub(f"Yuklashda xatolik: {str(ex)[:120]}")
+                zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry_id}{ext}"
+                return (zip_path, content)
 
+            except Exception as ex:
+                last_error = str(ex)[:120]
+                logger.warning(f"Entry #{entry_id} fetch attempt {attempt}/3 failed: {ex}")
+                await asyncio.sleep(1.5 * attempt)
 
+        logger.error(f"Entry #{entry_id}: all 3 fetch attempts failed. Last: {last_error}")
+        return make_stub(f"3 urinishdan keyin ham yuklab bo'lmadi: {last_error}")
 
 async def stream_files_zip(bot, entries: list, max_zip_bytes: int = 35 * 1024 * 1024):
     """
