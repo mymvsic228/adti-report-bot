@@ -54,6 +54,7 @@ class EditTitleState(StatesGroup):
 
 class PeriodReportState(StatesGroup):
     waiting_for_custom_interval = State()
+    waiting_for_zip_interval = State()
 
 class AddEntry(StatesGroup):
     choose_category = State()
@@ -1596,7 +1597,7 @@ async def prompt_zip_download(message: types.Message):
         return
 
     kb = InlineKeyboardBuilder()
-    # Добавляем каждую категорию из INDICATORS как отдельный ZIP
+    kb.button(text="📅 Давр бўйича ZIP (Йил-Ой)", callback_data="zipmenu_period")
     for key, label in INDICATORS:
         kb.button(text=f"{label} (.zip)", callback_data=f"zip_cat_{key}")
     kb.adjust(1)
@@ -1611,6 +1612,148 @@ async def prompt_zip_download(message: types.Message):
         reply_markup=kb.as_markup(),
         parse_mode="HTML"
     )
+
+
+@dp.callback_query(F.data == "zipmenu_period")
+async def show_zip_period_menu(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("❌ Рухсат йўқ", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📅 1-ярим йиллик (01—06)", callback_data="zip_period:2026-01:2026-06")
+    kb.button(text="📅 2-ярим йиллик (07—12)", callback_data="zip_period:2026-07:2026-12")
+
+    months = [
+        ("Январ", "2026-01"), ("Феврал", "2026-02"), ("Март", "2026-03"),
+        ("Апрел", "2026-04"), ("Май", "2026-05"), ("Июн", "2026-06"),
+        ("Июл", "2026-07"), ("Август", "2026-08"), ("Сентябр", "2026-09"),
+        ("Октябр", "2026-10"), ("Ноябр", "2026-11"), ("Декабр", "2026-12"),
+    ]
+    for lbl, ym in months:
+        kb.button(text=f"{lbl} ({ym[-2:]})", callback_data=f"zip_period:{ym}:{ym}")
+
+    kb.button(text="✍️ Бошқа интервал киритиш", callback_data="zip_custom_interval")
+    kb.button(text="🔙 Орқага", callback_data="zip_back_main")
+    kb.adjust(2, 3, 3, 3, 3, 1, 1)
+
+    caption_txt = (
+        "📦 <b>Қайси даврнинг (Йил ва Ой) файллар архивини юкламоқчисиз?</b>\n\n"
+        "<i>Танланган даврга тегишли барча PDF файллар категориялар бўйича папкаларга ажратилиб, "
+        "ZIP архив сифатида юборилади.</i>"
+    )
+    await cb.message.edit_text(caption_txt, reply_markup=kb.as_markup(), parse_mode="HTML")
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "zip_back_main")
+async def back_to_zip_main(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📅 Давр бўйича ZIP (Йил-Ой)", callback_data="zipmenu_period")
+    for key, label in INDICATORS:
+        kb.button(text=f"{label} (.zip)", callback_data=f"zip_cat_{key}")
+    kb.adjust(1)
+    kb.row(InlineKeyboardButton(text="❌ Бекор қилиш", callback_data="cancel"))
+
+    await cb.message.edit_text(
+        "📦 <b>Файллар ZIP архивини юклаб олиш</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ <i>Telegram 50 MB лимити сабабли барча файллар бирлаштирилмайди.</i>\n"
+        "Ҳар бир бўлим ёки давр алоҳида ZIP архив сифатида юкланади.\n\n"
+        "Керакли бўлим ёки даврни танланг 👇",
+        reply_markup=kb.as_markup(),
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "zip_custom_interval")
+async def ask_zip_custom_interval(cb: types.CallbackQuery, state: FSMContext):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("❌ Рухсат йўқ", show_alert=True)
+        return
+
+    await state.set_state(PeriodReportState.waiting_for_zip_interval)
+    msg_prompt = (
+        "✍️ <b>ZIP архив учун керакли даврни ёзиб юборинг:</b>\n\n"
+        "Масалан:\n"
+        "• <code>2026-04</code> (бир ой учун)\n"
+        "• <code>2026-01 - 2026-06</code> (давр учун)\n\n"
+        "<i>Бекор қилиш учун /cancel деб ёзинг.</i>"
+    )
+    await cb.message.edit_text(msg_prompt, parse_mode="HTML")
+    await cb.answer()
+
+
+@dp.message(PeriodReportState.waiting_for_zip_interval, F.text)
+async def handle_zip_custom_interval(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    text = message.text.strip()
+    if text in ("/cancel", "❌ Бекор қилиш", "cancel"):
+        await state.clear()
+        await message.answer("❌ Бекор қилинди.", reply_markup=main_kb(message.from_user.id))
+        return
+
+    import re
+    matches = re.findall(r'\b(202[0-9]|201[0-9])[\.\/\-](\d{1,2})\b', text)
+    if not matches:
+        await message.answer("⚠️ <b>Нотўғри формат!</b>\nИлтимос, <code>2026-04</code> ёки <code>2026-01 - 2026-06</code> кўринишида ёзинг.", parse_mode="HTML")
+        return
+
+    if len(matches) == 1:
+        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
+        end_ym = start_ym
+    else:
+        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
+        end_ym = f"{int(matches[1][0]):04d}-{int(matches[1][1]):02d}"
+
+    if start_ym > end_ym:
+        start_ym, end_ym = end_ym, start_ym
+
+    period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
+    await state.clear()
+
+    entries = await get_files_for_zip(start_ym=start_ym, end_ym=end_ym)
+    if not entries:
+        await message.answer(f"📭 <b>{period_text} даврида бирорта файл топилмади.</b>", parse_mode="HTML")
+        return
+
+    await message.answer(f"⏳ <b>{period_text} даври учун {len(entries)} та файл архивланиб юборилмоқда...</b>", parse_mode="HTML")
+
+    label_info = f"{period_text} даври файллар архиви"
+    zip_name = f"ADTI_{start_ym}_{end_ym}_Fayllar.zip" if start_ym != end_ym else f"ADTI_{start_ym}_Fayllar.zip"
+
+    sent_parts = 0
+    total_files_sent = 0
+    try:
+        async for part_buf, part_count in stream_files_zip(bot, entries, max_zip_bytes=35 * 1024 * 1024):
+            sent_parts += 1
+            total_files_sent += part_count
+            part_size_mb = part_buf.getbuffer().nbytes / (1024 * 1024)
+
+            part_base = zip_name.replace('.zip', '')
+            part_filename = f"{part_base}_Part_{sent_parts:02d}.zip"
+
+            await bot.send_document(
+                message.chat.id,
+                types.BufferedInputFile(part_buf.getvalue(), filename=part_filename),
+                caption=f"📦 <b>{label_info}</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"📑 Қисм: <b>{sent_parts}</b>\n"
+                        f"📁 Файллар сони: <b>{part_count} та</b>\n"
+                        f"💾 Ҳажми: <b>{part_size_mb:.1f} МБ</b>",
+                parse_mode="HTML"
+            )
+            part_buf.close()
+            await asyncio.sleep(0.3)
+
+        await message.answer(f"✅ <b>{label_info} тўлиқ юборилди! (Жами: {total_files_sent} та файл)</b>", parse_mode="HTML")
+    except Exception as ex:
+        await message.answer(f"❌ ZIP юборишда хатолик: {ex}")
 
 
 @dp.callback_query(F.data.startswith("zip_"))
@@ -1641,6 +1784,14 @@ async def process_zip_download(cb: types.CallbackQuery):
         entries = await get_files_for_zip(category=cat_key)
         label_info = INDICATOR_LABELS.get(cat_key, cat_key)
         zip_name = f"ADTI_2026_{cat_key}.zip"
+    elif zip_type.startswith("period:"):
+        parts = zip_type.split(":")
+        start_ym = parts[1]
+        end_ym = parts[2]
+        period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
+        label_info = f"{period_text} даври файллар архиви"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_Fayllar.zip" if start_ym != end_ym else f"ADTI_{start_ym}_Fayllar.zip"
+        entries = await get_files_for_zip(start_ym=start_ym, end_ym=end_ym)
 
     if not entries:
         await cb.message.edit_text(f"📭 <b>Ушбу бўлимда ҳали бирорта файл бириктирилмаган.</b>\n<i>({label_info})</i>", parse_mode="HTML")
@@ -1812,10 +1963,14 @@ async def process_period_report(cb: types.CallbackQuery):
         f"📊 1-қисм: 65 та кафедранинг {period_text} даври сводкаси\n"
         f"📝 2-қисм: Мазкур даврдаги илмий ишларнинг батафсил рўйхати"
     )
+    zip_btn_kb = InlineKeyboardBuilder()
+    zip_btn_kb.button(text="📦 Ушбу давр ZIP архивини юклаш", callback_data=f"zip_period:{start_ym}:{end_ym}")
+
     await bot.send_document(
         cb.message.chat.id,
         types.BufferedInputFile(buf_doc.read(), filename=f"ADTI_{period_text}_hisobot.docx"),
         caption=doc_cap,
+        reply_markup=zip_btn_kb.as_markup(),
         parse_mode="HTML"
     )
     await cb.answer()
