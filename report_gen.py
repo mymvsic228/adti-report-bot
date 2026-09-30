@@ -713,6 +713,39 @@ def sanitize_filename(text: str, max_len: int = 50) -> str:
     return clean[:max_len]
 
 
+def detect_file_extension(content: bytes, orig_file_path: str = None, tg_file_path: str = None) -> str:
+    """Определяет реальное расширение файла по сигнатуре (magic bytes) и путям"""
+    if not content:
+        return ".bin"
+    if content.startswith(b'%PDF'):
+        return '.pdf'
+    if content.startswith(b'PK\x03\x04'):
+        orig_ext = Path(orig_file_path or '').suffix.lower()
+        if orig_ext in ('.docx', '.xlsx', '.pptx', '.zip'):
+            return orig_ext
+        return '.docx'
+    if content.startswith(b'\xd0\xcf\x11\xe0'):
+        return '.doc'
+    if content.startswith(b'\xff\xd8\xff'):
+        return '.jpg'
+    if content.startswith(b'\x89PNG\r\n\x1a\n'):
+        return '.png'
+    if content.startswith(b'Rar!\x1a\x07'):
+        return '.rar'
+    if content.startswith(b'{\\rtf'):
+        return '.rtf'
+
+    orig_ext = Path(orig_file_path or '').suffix.lower()
+    if orig_ext and len(orig_ext) <= 6:
+        return orig_ext
+
+    tg_ext = Path(tg_file_path or '').suffix.lower()
+    if tg_ext and len(tg_ext) <= 6:
+        return tg_ext
+
+    return '.pdf'
+
+
 async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
     file_id = entry.get('file_id')
     cat_folder = CATEGORY_FOLDERS.get(entry.get('category'), entry.get('category', 'other'))
@@ -756,28 +789,17 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
                 else:
                     content = bytes(f_stream)
 
-                if not content:
-                    last_error = "Yuklab olingan kontent bo'sh"
+                if not content or len(content) < 50:
+                    last_error = "Yuklab olingan kontent bo'sh yoki juda kichik"
                     await asyncio.sleep(1.5 * attempt)
                     continue
 
-                ext = Path(tg_file.file_path).suffix.lower() or ".pdf"
-                if not ext.startswith("."):
-                    ext = "." + ext
+                if content.startswith(b'{"ok":false') or content.startswith(b'<html') or content.startswith(b'<!DOCTYPE html'):
+                    last_error = "Telegram serveridan xato javob qaytdi (hujjat emas)"
+                    await asyncio.sleep(1.5 * attempt)
+                    continue
 
-                if ext == ".pdf":
-                    if not content.startswith(b'%PDF'):
-                        last_error = (
-                            f"PDF sarlavhasi topilmadi (fayl buzilgan, "
-                            f"boshlanishi: {content[:8].hex()}, urinish {attempt}/3)"
-                        )
-                        logger.warning(f"Entry #{entry_id}: {last_error}")
-                        await asyncio.sleep(1.5 * attempt)
-                        continue
-                    if len(content) < 100:
-                        last_error = f"PDF hajmi juda kichik ({len(content)} bayt)"
-                        await asyncio.sleep(1)
-                        continue
+                ext = detect_file_extension(content, entry.get('file_path'), tg_file.file_path)
 
                 zip_path = f"{cat_folder}/[Kaf_{dept_id:02d}]_{author}_{title}_id{entry_id}{ext}"
                 return (zip_path, content)
