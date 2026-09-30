@@ -1,23 +1,161 @@
 import io
 import asyncio
 import logging
+import re
 from pathlib import Path
 from docx import Document
 from docx.shared import Pt
-from database import INDICATORS, INDICATOR_KEYS
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+from database import INDICATORS, INDICATOR_KEYS, INDICATOR_LABELS, RAW_DEPARTMENTS
 
 logger = logging.getLogger(__name__)
 
 
-async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -> io.BytesIO:
+def normalize_work_date(pub_date_str: str, year: int = 2026, created_at = None):
+    """
+    Returns (year: int, month: int, day: int, ym_str: str, source: str)
+    Priority:
+    1. Exact date (DD.MM.YYYY, YYYY-MM-DD, etc.)
+    2. Month name in Uzbek / Russian / English
+    3. Issue / number in journal (№1..12, No. 1..12, Issue 1..12, Son 1..12)
+    4. Fallback to created_at (date submitted to bot)
+    """
+    s = str(pub_date_str or '').strip()
+    s_lower = s.lower()
+    
+    # 1. Exact date DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY
+    m = re.search(r'\b(\d{1,2})[\.\/\-](\d{1,2})[\.\/\-](\d{4})\b', s)
+    if m:
+        d, mth, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if 1 <= mth <= 12 and 1 <= d <= 31:
+            return yr, mth, d, f"{yr:04d}-{mth:02d}", "exact_date"
+        elif 1 <= d <= 12 and 1 <= mth <= 31:
+            return yr, d, mth, f"{yr:04d}-{d:02d}", "exact_date"
+
+    # YYYY.MM.DD
+    m2 = re.search(r'\b(\d{4})[\.\/\-](\d{1,2})[\.\/\-](\d{1,2})\b', s)
+    if m2:
+        yr, mth, d = int(m2.group(1)), int(m2.group(2)), int(m2.group(3))
+        if 1 <= mth <= 12 and 1 <= d <= 31:
+            return yr, mth, d, f"{yr:04d}-{mth:02d}", "exact_date"
+
+    # YYYY.MM
+    m3 = re.search(r'\b(\d{4})[\.\/\-](\d{1,2})\b', s)
+    if m3:
+        yr, mth = int(m3.group(1)), int(m3.group(2))
+        if 1 <= mth <= 12:
+            return yr, mth, 1, f"{yr:04d}-{mth:02d}", "exact_month"
+
+    # 2. Month name
+    months_map = {
+        'yanvar': 1, 'январ': 1, 'jan': 1,
+        'fevral': 2, 'феврал': 2, 'feb': 2,
+        'mart': 3, 'март': 3, 'mar': 3,
+        'aprel': 4, 'апрел': 4, 'apr': 4,
+        'may': 5, 'май': 5,
+        'iyun': 6, 'июн': 6, 'jun': 6,
+        'iyul': 7, 'июл': 7, 'jul': 7,
+        'avgust': 8, 'август': 8, 'aug': 8,
+        'sentyabr': 9, 'sentabr': 9, 'сентябр': 9, 'sep': 9,
+        'oktyabr': 10, 'oktabr': 10, 'октябр': 10, 'oct': 10,
+        'noyabr': 11, 'ноябр': 11, 'nov': 11,
+        'dekabr': 12, 'декабр': 12, 'dec': 12
+    }
+    for name, mth_num in months_map.items():
+        if name in s_lower:
+            y_m = re.search(r'\b(202[0-9]|201[0-9])\b', s)
+            yr = int(y_m.group(1)) if y_m else (year or 2026)
+            d_m = re.search(r'\b(\d{1,2})[\s\-]+' + name, s_lower)
+            d = int(d_m.group(1)) if (d_m and 1 <= int(d_m.group(1)) <= 31) else 1
+            return yr, mth_num, d, f"{yr:04d}-{mth_num:02d}", "month_name"
+
+    # 3. Issue / Number in journal (№1..12, No. 1..12, Issue 1..12, Son 1..12)
+    m_iss = re.search(r'(?:no\.?|№|issue|сон|выпуск|вып\.?)\s*(\d{1,2})\b', s_lower)
+    if not m_iss:
+        m_iss = re.search(r'\b(\d{1,2})\s*-\s*сон\b', s_lower)
+    if not m_iss:
+        m_iss = re.search(r'\(\s*(\d{1,2})\s*\)', s)
+        
+    if m_iss:
+        iss_num = int(m_iss.group(1))
+        if 1 <= iss_num <= 12:
+            y_m = re.search(r'\b(202[0-9]|201[0-9])\b', s)
+            yr = int(y_m.group(1)) if y_m else (year or 2026)
+            return yr, iss_num, 1, f"{yr:04d}-{iss_num:02d}", "issue_number"
+
+    # 4. Fallback: created_at date
+    if created_at:
+        try:
+            yr = created_at.year
+            mth = created_at.month
+            d = created_at.day
+            return yr, mth, d, f"{yr:04d}-{mth:02d}", "fallback_created_at"
+        except Exception:
+            pass
+
+    yr = year or 2026
+    return yr, 1, 1, f"{yr:04d}-01", "fallback_default"
+
+
+def recompute_summary_for_period(filtered_detailed_rows: list) -> list:
+    cats = ['scopus_wos', 'phd', 'dsc', 'monography', 'patent', 'oak_uz', 'oak_ru_if', 
+            'thesis_uz', 'thesis_foreign', 'rationalizer', 'implementation', 'conferences', 'contracts', 'grants']
+    
+    summary_map = {}
+    for d_id, d_name, d_head in RAW_DEPARTMENTS:
+        summary_map[d_id] = {
+            'id': d_id,
+            'name': d_name,
+            'head_name': d_head,
+            'total': 0
+        }
+        for c in cats:
+            summary_map[d_id][c] = 0
+            
+    for r in filtered_detailed_rows:
+        did = r['dept_id']
+        cat = r.get('category', '')
+        if did in summary_map:
+            summary_map[did]['total'] += 1
+            if cat in summary_map[did]:
+                summary_map[did][cat] += 1
+                
+    return list(summary_map.values())
+
+
+async def generate_report_docx(summary_rows: list, detailed_rows: list = None, start_ym: str = None, end_ym: str = None) -> io.BytesIO:
     """
     Генерирует официальный Word-отчёт АДТИ по форме «2026 йил хисобот»
-    1-қисм: 65 та кафедра сводкаси
-    2-қисм: Илмий ишлар ва уларнинг муаллифлари батафсил рўйхати (Шаффофлик учун)
+    Опционально фильтрует по интервалу start_ym .. end_ym (например: 2026-01 .. 2026-06)
     """
-    from database import INDICATOR_LABELS
-
     doc = Document()
+
+    # Enrich rows with normalized dates
+    if detailed_rows:
+        for d in detailed_rows:
+            if '_norm_ym' not in d:
+                yr, mth, day, ym, src = normalize_work_date(d.get('pub_date'), d.get('year'), d.get('created_at'))
+                d['_norm_yr'] = yr
+                d['_norm_mth'] = mth
+                d['_norm_day'] = day
+                d['_norm_ym'] = ym
+                d['_norm_src'] = src
+
+    period_title = ""
+    if start_ym or end_ym:
+        if start_ym and not end_ym: end_ym = start_ym
+        if end_ym and not start_ym: start_ym = end_ym
+        if detailed_rows:
+            detailed_rows = [d for d in detailed_rows if start_ym <= d['_norm_ym'] <= end_ym]
+        summary_rows = recompute_summary_for_period(detailed_rows or [])
+        period_title = f"{start_ym} ДАВРИ" if start_ym == end_ym else f"{start_ym} — {end_ym} ДАВРИ"
+
+    # Сортировка детальных строк по дате (свежие сверху)
+    if detailed_rows:
+        detailed_rows.sort(key=lambda d: (d.get('_norm_ym', ''), d.get('_norm_day', 0), d.get('id', 0)), reverse=True)
 
     # ─── 1-ҚИСМ: СВОДКА ТАБЛИЦАСИ ────────────────────────────────────────────
     title = doc.add_paragraph()
@@ -25,7 +163,8 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
     run = title.add_run("АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ КАФЕДРАЛАРИ ТОМОНИДАН\n")
     run.bold = True
     run.font.size = Pt(12)
-    run2 = title.add_run("2026 ЙИЛ ХИСОБОТИ — ИЛМИЙ ТАДҚИҚОТ ИШЛАРИ ТЎҒРИСИДА МАЪЛУМОТ")
+    header_subtitle = f"2026 ЙИЛ ({period_title}) ХИСОБОТИ" if period_title else "2026 ЙИЛ ХИСОБОТИ"
+    run2 = title.add_run(f"{header_subtitle} — ИЛМИЙ ТАДҚИҚОТ ИШЛАРИ ТЎҒРИСИДА МАЪЛУМОТ")
     run2.bold = True
     run2.font.size = Pt(12)
 
@@ -52,7 +191,7 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
         hdr[i].paragraphs[0].runs[0].bold = True
 
     # Данные
-    totals = [0] * (len(col_headers) - 3)  # для итоговой строки
+    totals = [0] * (len(col_headers) - 3)
 
     for r in summary_rows:
         row = table.add_row().cells
@@ -66,7 +205,7 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
             r['thesis_uz'], r['thesis_foreign'],
             r['scopus_wos'],
             r['rationalizer'], r['implementation'],
-            r['conferences'], '', ''  # contracts и grants — текстовые поля
+            r['conferences'], '', ''
         ]
 
         for i, v in enumerate(vals):
@@ -82,7 +221,6 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
     for i, t in enumerate(totals):
         total_row[i + 3].text = str(t) if t else ''
 
-    # Формат шрифтов таблицы 1
     for row in table.rows:
         for cell in row.cells:
             for para in cell.paragraphs:
@@ -103,7 +241,8 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
         r_app2.font.size = Pt(12)
 
         p_info = doc.add_paragraph()
-        p_info.add_run(f"Жами рўйхатга олинган ишлар: {len(detailed_rows)} та\n").italic = True
+        sub_text = f" ({period_title})" if period_title else ""
+        p_info.add_run(f"Жами рўйхатга олинган ишлар: {len(detailed_rows)} та{sub_text}\n").italic = True
 
         det_cols = [
             "Т/Р", "Кафедра номи", "Йўналиш",
@@ -126,13 +265,12 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
             row[2].text = INDICATOR_LABELS.get(cat_k, cat_k)
             row[3].text = str(d.get('title', '') or '—')
             
-            # Муаллифлар алоҳида ажралиб туради (Bold)
             row[4].text = str(d.get('authors', '') or '—')
             if row[4].paragraphs and row[4].paragraphs[0].runs:
                 row[4].paragraphs[0].runs[0].bold = True
 
-            # Қўшимча майдонлар (журнал, сана, давлат, сумма)
             extra_parts = []
+            if d.get('_norm_ym'): extra_parts.append(f"Давр: {d['_norm_ym']}")
             if d.get('country'): extra_parts.append(f"Давлат: {d['country']}")
             if d.get('journal_name'): extra_parts.append(f"Журнал: {d['journal_name']}")
             if d.get('pub_date'): extra_parts.append(f"Сана: {d['pub_date']}")
@@ -153,12 +291,7 @@ async def generate_report_docx(summary_rows: list, detailed_rows: list = None) -
 
 
 async def generate_codes_docx(departments: list) -> io.BytesIO:
-    """
-    Генерирует Word-файл с индивидуальными кодами доступа для всех 65 кафедр
-    (для передачи завкафедрами)
-    """
     doc = Document()
-
     title = doc.add_paragraph()
     title.alignment = 1
     run = title.add_run("АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ\n")
@@ -202,16 +335,14 @@ async def generate_codes_docx(departments: list) -> io.BytesIO:
     return buf
 
 
-async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.BytesIO:
+async def generate_report_excel(summary_rows: list, detailed_rows: list, start_ym: str = None, end_ym: str = None) -> io.BytesIO:
     """
-    Генерирует официальный Excel (.xlsx) отчёт с двумя листами:
-    1. «Сводка» — таблица 65 кафедр по всем 17 индикаторам с авто-суммами
-    2. «Барча ҳисоботлар» — полная база всех отправленных записей
+    Генерирует официальный Excel (.xlsx) отчёт с тремя листами:
+    1. «Сводка 65 кафедр» — с авто-суммами и автофильтрами
+    2. «Барча ҳисоботлар (База)» — со столбцом «Давр (Йил-Ой)», автофильтрами и сортировкой
+    3. «Кафедралар рейтинги» — рейтинг кафедр и топ-30 авторов
+    Опционально фильтрует по интервалу start_ym .. end_ym (например: 2026-01 .. 2026-06).
     """
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-
     wb = openpyxl.Workbook()
 
     # Стили
@@ -230,6 +361,27 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
     left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
 
+    # Enrich rows with normalized dates
+    for d in detailed_rows:
+        if '_norm_ym' not in d:
+            yr, mth, day, ym, src = normalize_work_date(d.get('pub_date'), d.get('year'), d.get('created_at'))
+            d['_norm_yr'] = yr
+            d['_norm_mth'] = mth
+            d['_norm_day'] = day
+            d['_norm_ym'] = ym
+            d['_norm_src'] = src
+
+    period_title = ""
+    if start_ym or end_ym:
+        if start_ym and not end_ym: end_ym = start_ym
+        if end_ym and not start_ym: start_ym = end_ym
+        detailed_rows = [d for d in detailed_rows if start_ym <= d['_norm_ym'] <= end_ym]
+        summary_rows = recompute_summary_for_period(detailed_rows)
+        period_title = f"{start_ym} ДАВРИ" if start_ym == end_ym else f"{start_ym} — {end_ym} ДАВРИ"
+
+    # Сортировка детальных строк по дате (свежие сверху)
+    detailed_rows.sort(key=lambda d: (d.get('_norm_ym', ''), d.get('_norm_day', 0), d.get('id', 0)), reverse=True)
+
     # ─── ЛИСТ 1: СВОДКА ──────────────────────────────────────────────────────
     ws1 = wb.active
     ws1.title = "Сводка 65 кафедр"
@@ -238,7 +390,8 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     # Заголовок
     ws1.merge_cells("A1:R1")
     title_cell = ws1["A1"]
-    title_cell.value = "АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — 2026 ЙИЛ ИЛМИЙ ХИСОБОТИ"
+    title_header_text = f"АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — {period_title} ИЛМИЙ ХИСОБОТИ" if period_title else "АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — 2026 ЙИЛ ИЛМИЙ ХИСОБОТИ"
+    title_cell.value = title_header_text
     title_cell.font = Font(name="Calibri", size=14, bold=True, color="1F4E79")
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws1.row_dimensions[1].height = 30
@@ -306,13 +459,15 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
         cell.border = thin_border
         cell.alignment = left_align if col_num == 2 else center_align
 
+    # Автофильтр Лист 1
+    ws1.auto_filter.ref = f"A3:R{tot_row_num - 1}"
+
     # ─── ЛИСТ 2: ДЕТАЛЬНЫЕ ЗАПИСИ ────────────────────────────────────────────
     ws2 = wb.create_sheet(title="Барча ҳисоботлар (База)")
     ws2.views.sheetView[0].showGridLines = True
 
-    from database import INDICATOR_LABELS
     det_headers = [
-        "ID", "Сана/Вақт", "Кафедра ID", "Кафедра номи", "Кафедра мудири",
+        "ID", "Давр (Йил-Ой)", "Киритилган вақт", "Кафедра ID", "Кафедра номи", "Кафедра мудири",
         "Категория", "Иш номи / Диссертация мавзуси", "Муаллифлар (Ф.И.Ш.)",
         "Шартнома/Грант суммаси (млн)", "Нашр давлати", "Журнал/Буюртмачи", "Нашр йили / Сана / Бетлар",
         "URL / DOI", "Муаллифлар сони", "Ихтисослик шифри ва номи",
@@ -333,10 +488,15 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
         cat_lbl = INDICATOR_LABELS.get(d['category'], d['category'])
         doi_or_url = d.get('doi', '') or d.get('url', '') or ''
         r_data = [
-            d['id'], str(d['created_at'])[:16], d['dept_id'], d['dept_name'],
-            d['head_name'] or '', cat_lbl,
-            d['title'] or '',
-            d['authors'] or '',
+            d['id'],
+            d.get('_norm_ym', ''),
+            str(d.get('created_at', ''))[:16],
+            d['dept_id'],
+            d.get('dept_name', ''),
+            d.get('head_name', '') or '',
+            cat_lbl,
+            d.get('title', '') or '',
+            d.get('authors', '') or '',
             d.get('amount', '') or '',
             d.get('country', '') or '',
             d.get('journal_name', '') or '',
@@ -354,16 +514,22 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             cell = ws2.cell(row=curr, column=col_idx)
             cell.font = regular_font
             cell.border = thin_border
-            cell.alignment = left_align if col_idx in (4, 7, 8, 9, 10, 11, 12, 13, 15) else center_align
+            if col_idx in (2,):
+                cell.font = bold_font
+            cell.alignment = left_align if col_idx in (5, 8, 9, 10, 11, 12, 13, 14, 16) else center_align
+
+    # Автофильтр Лист 2
+    if ws2.max_row > 1:
+        ws2.auto_filter.ref = f"A1:S{ws2.max_row}"
 
     # ─── ЛИСТ 3: КАФЕДРАЛАР РЕЙТИНГИ ВА ЛИДЕРЛАР ────────────────────────────
     ws3 = wb.create_sheet(title="Кафедралар рейтинги")
     ws3.views.sheetView[0].showGridLines = True
 
-    # Заголовок Листа 3
     ws3.merge_cells("A1:N1")
     title_r = ws3["A1"]
-    title_r.value = "АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — КАФЕДРАЛАРНИНГ ИЛМИЙ ФАОЛЛИК РЕЙТИНГИ (2026 ЙИЛ)"
+    rating_header_text = f"АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — КАФЕДРАЛАР РЕЙТИНГИ ({period_title})" if period_title else "АНДИЖОН ДАВЛАТ ТИББИЁТ ИНСТИТУТИ — КАФЕДРАЛАРНИНГ ИЛМИЙ ФАОЛЛИК РЕЙТИНГИ (2026 ЙИЛ)"
+    title_r.value = rating_header_text
     title_r.font = Font(name="Calibri", size=13, bold=True, color="1F4E79")
     title_r.alignment = Alignment(horizontal="center", vertical="center")
     ws3.row_dimensions[1].height = 28
@@ -379,8 +545,6 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
     ws3.row_dimensions[3].height = 26
 
     rank_header_fill = PatternFill(start_color="1F4E79", end_color="1F4E79", fill_type="solid")
-    top10_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")  # soft green
-    zero_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")   # soft red
 
     for col_num in range(1, len(rank_headers) + 1):
         c = ws3.cell(row=3, column=col_num)
@@ -389,7 +553,6 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
         c.alignment = center_align
         c.border = thin_border
 
-    # Сортировка кафедр по убыванию количества работ
     sorted_depts = sorted(summary_rows, key=lambda r: -(r.get('total') or 0))
 
     for rank, r in enumerate(sorted_depts, 1):
@@ -398,53 +561,45 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
         theses = (r.get('thesis_uz') or 0) + (r.get('thesis_foreign') or 0)
         grants = (r.get('contracts') or 0) + (r.get('grants') or 0)
 
-        if tot >= 50:
+        if tot >= 30:
             status_txt = "🔥 Юқори фаол (Лидер)"
-        elif tot >= 15:
+        elif tot >= 10:
             status_txt = "✅ Фаол"
         elif tot > 0:
             status_txt = "⚠️ Паст кўрсаткич"
         else:
             status_txt = "❌ Иш топширмаган (0)"
 
-        row_vals = [
-            f"#{rank}", r['id'], r['name'], r['head_name'] or '—',
-            tot, r['scopus_wos'] or 0, r['oak_uz'] or 0, r['oak_ru_if'] or 0,
-            r['patent'] or 0, diss, r['monography'] or 0, theses,
+        rank_row_vals = [
+            f"#{rank}", r['id'], r['name'], r['head_name'] or '',
+            tot, r.get('scopus_wos') or 0, r.get('oak_uz') or 0, r.get('oak_ru_if') or 0,
+            r.get('patent') or 0, diss, r.get('monography') or 0, theses,
             grants, status_txt
         ]
-        ws3.append(row_vals)
+        ws3.append(rank_row_vals)
         curr = ws3.max_row
         ws3.row_dimensions[curr].height = 20
 
-        is_top10 = rank <= 10 and tot > 0
-        is_zero = tot == 0
-
-        for col_idx in range(1, len(row_vals) + 1):
-            cell = ws3.cell(row=curr, column=col_idx)
-            cell.font = bold_font if col_idx in (1, 5, 14) else regular_font
+        for col_idx, val in enumerate(rank_row_vals):
+            cell = ws3.cell(row=curr, column=col_idx + 1)
+            cell.font = bold_font if col_idx in (0, 4) else regular_font
             cell.border = thin_border
-            if is_top10:
-                cell.fill = top10_fill
-            elif is_zero:
-                cell.fill = zero_fill
+            cell.alignment = left_align if col_idx in (2, 3) else center_align
 
-            if col_idx in (3, 4):
-                cell.alignment = left_align
-            else:
-                cell.alignment = center_align
+    # Автофильтр Лист 3
+    if sorted_depts:
+        ws3.auto_filter.ref = f"A3:N{len(sorted_depts) + 3}"
 
-    # ─── ТАБЛИЦА 2: ТОП-30 МУАЛЛИФЛАР (ЛИСТ 3) ──────────────────────────────
+    # ТОП-30 АВТОРОВ
     ws3.append([])
     ws3.append([])
-    author_table_start = ws3.max_row + 1
-
-    ws3.merge_cells(f"A{author_table_start}:H{author_table_start}")
-    auth_title = ws3[f"A{author_table_start}"]
-    auth_title.value = "ИНСТИТУТНИНГ ЭНГ ФАОЛ МУАЛЛИФЛАРИ ВА ТАДҚИҚОТЧИЛАРИ (ТОП-30)"
-    auth_title.font = Font(name="Calibri", size=12, bold=True, color="1F4E79")
-    auth_title.alignment = Alignment(horizontal="center", vertical="center")
-    ws3.row_dimensions[author_table_start].height = 26
+    auth_title_row = ws3.max_row
+    ws3.merge_cells(f"A{auth_title_row}:H{auth_title_row}")
+    auth_title_cell = ws3[f"A{auth_title_row}"]
+    auth_title_cell.value = "ИНСТИТУТНИНГ ЭНГ ФАОЛ 30 ТА ОЛИМ ВА МУАЛЛИФЛАРИ (РЕЙТИНГ)"
+    auth_title_cell.font = Font(name="Calibri", size=12, bold=True, color="1F4E79")
+    auth_title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws3.row_dimensions[auth_title_row].height = 26
 
     auth_headers = [
         "Ўрни", "Муаллифнинг Ф.И.Ш.", "Кафедра номи",
@@ -460,7 +615,6 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
         c.alignment = center_align
         c.border = thin_border
 
-    # Подсчёт активности авторов
     authors_data = {}
     for d in detailed_rows:
         auth_str = (d.get('authors') or '').strip()
@@ -500,7 +654,7 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
             cell.border = thin_border
             cell.alignment = left_align if col_idx in (2, 3) else center_align
 
-    # Автоширина колонок для всех листов
+    # Автоширина колонок
     for ws in (ws1, ws2, ws3):
         for col in ws.columns:
             max_len = 0
@@ -513,12 +667,11 @@ async def generate_report_excel(summary_rows: list, detailed_rows: list) -> io.B
 
     ws1.column_dimensions["B"].width = 38
     ws1.column_dimensions["C"].width = 28
-    ws2.column_dimensions["D"].width = 35
-    ws2.column_dimensions["G"].width = 40
-    ws2.column_dimensions["H"].width = 30
-    ws2.column_dimensions["J"].width = 32
-    ws2.column_dimensions["K"].width = 25
-    ws2.column_dimensions["L"].width = 45
+    ws2.column_dimensions["B"].width = 16
+    ws2.column_dimensions["C"].width = 18
+    ws2.column_dimensions["E"].width = 38
+    ws2.column_dimensions["H"].width = 40
+    ws2.column_dimensions["I"].width = 30
 
     ws3.column_dimensions["A"].width = 16
     ws3.column_dimensions["B"].width = 12
@@ -553,7 +706,6 @@ CATEGORY_FOLDERS = {
 
 def sanitize_filename(text: str, max_len: int = 50) -> str:
     """Очищает строку от недопустимых символов для имен файлов"""
-    import re
     if not text:
         return "hujjat"
     clean = re.sub(r'[\\/*?:"<>|\n\r\t]', '_', str(text))
@@ -586,7 +738,7 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
 
     async with sem:
         last_error = "Noma'lum xato"
-        for attempt in range(1, 4):  # 3 urinish
+        for attempt in range(1, 4):
             try:
                 tg_file = await bot.get_file(file_id)
 
@@ -613,7 +765,6 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
                 if not ext.startswith("."):
                     ext = "." + ext
 
-                # PDF fayllar uchun magic bytes tekshiruvi
                 if ext == ".pdf":
                     if not content.startswith(b'%PDF'):
                         last_error = (
@@ -639,13 +790,8 @@ async def fetch_file_content(bot, entry: dict, sem: asyncio.Semaphore):
         logger.error(f"Entry #{entry_id}: all 3 fetch attempts failed. Last: {last_error}")
         return make_stub(f"3 urinishdan keyin ham yuklab bo'lmadi: {last_error}")
 
+
 async def stream_files_zip(bot, entries: list, max_zip_bytes: int = 35 * 1024 * 1024):
-    """
-    Скачивает файлы параллельно пачками и генерирует ZIP-архивы,
-    где каждый архив строго не превышает max_zip_bytes (35 МБ),
-    что исключает ошибку Telegram 'Request Entity Too Large' (лимит 50 МБ).
-    Yields: (io.BytesIO, int count_files)
-    """
     import zipfile
 
     if not entries:
@@ -670,13 +816,11 @@ async def stream_files_zip(bot, entries: list, max_zip_bytes: int = 35 * 1024 * 
             if not content:
                 continue
 
-            # Если добавление файла превысит 35 МБ, запечатываем текущий архив и отдаём
             if (current_buf.tell() + len(content)) > max_zip_bytes and current_count > 0:
                 current_zf.close()
                 current_buf.seek(0)
                 yield current_buf, current_count
 
-                # Начинаем новый архив
                 current_buf = io.BytesIO()
                 current_zf = zipfile.ZipFile(current_buf, "w", compression=zipfile.ZIP_DEFLATED)
                 current_count = 0
@@ -693,12 +837,6 @@ async def stream_files_zip(bot, entries: list, max_zip_bytes: int = 35 * 1024 * 
 
 
 async def generate_files_zip(bot, entries: list) -> tuple[io.BytesIO, int]:
-    """
-    Возвращает первый архив из stream_files_zip.
-    """
     async for buf, count in stream_files_zip(bot, entries):
         return buf, count
     return io.BytesIO(), 0
-
-
-
