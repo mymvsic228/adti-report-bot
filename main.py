@@ -52,6 +52,31 @@ class RestoreState(StatesGroup):
 class EditTitleState(StatesGroup):
     waiting_for_new_title = State()
 
+def parse_user_interval(text: str):
+    """Парсит пользовательский ввод: '2025', '2026-04', '2025-09 - 2026-05', '2024 - 2025'"""
+    text = text.strip()
+    import re
+    matches_ym = re.findall(r'\b(201[0-9]|202[0-9])[\.\/\-](\d{1,2})\b', text)
+    if len(matches_ym) >= 2:
+        s_ym = f"{int(matches_ym[0][0]):04d}-{int(matches_ym[0][1]):02d}"
+        e_ym = f"{int(matches_ym[1][0]):04d}-{int(matches_ym[1][1]):02d}"
+        if s_ym > e_ym: s_ym, e_ym = e_ym, s_ym
+        return s_ym, e_ym
+    elif len(matches_ym) == 1:
+        s_ym = f"{int(matches_ym[0][0]):04d}-{int(matches_ym[0][1]):02d}"
+        return s_ym, s_ym
+
+    matches_y = re.findall(r'\b(201[0-9]|202[0-9])\b', text)
+    if len(matches_y) >= 2:
+        y1, y2 = sorted([int(matches_y[0]), int(matches_y[1])])
+        return f"{y1:04d}-01", f"{y2:04d}-12"
+    elif len(matches_y) == 1:
+        y = int(matches_y[0])
+        return f"{y:04d}-01", f"{y:04d}-12"
+
+    return None, None
+
+
 class PeriodReportState(StatesGroup):
     waiting_for_custom_interval = State()
     waiting_for_zip_interval = State()
@@ -1631,11 +1656,13 @@ async def show_zip_period_menu(cb: types.CallbackQuery):
         ("Октябр", "2026-10"), ("Ноябр", "2026-11"), ("Декабр", "2026-12"),
     ]
     for lbl, ym in months:
-        kb.button(text=f"{lbl} ({ym[-2:]})", callback_data=f"zip_period:{ym}:{ym}")
+        kb.button(text=lbl, callback_data=f"zip_period:{ym}:{ym}")
 
-    kb.button(text="✍️ Бошқа интервал киритиш", callback_data="zip_custom_interval")
+    kb.button(text="📚 2025 йил тўлиқ", callback_data="zip_period:2025-01:2025-12")
+    kb.button(text="📚 2024 йил тўлиқ", callback_data="zip_period:2024-01:2024-12")
+    kb.button(text="✍️ Бошқа йил/интервал киритиш", callback_data="zip_custom_interval")
     kb.button(text="🔙 Орқага", callback_data="zip_back_main")
-    kb.adjust(2, 3, 3, 3, 3, 1, 1)
+    kb.adjust(2, 3, 3, 3, 3, 2, 1, 1)
 
     caption_txt = (
         "📦 <b>Қайси даврнинг (Йил ва Ой) файллар архивини юкламоқчисиз?</b>\n\n"
@@ -1677,10 +1704,12 @@ async def ask_zip_custom_interval(cb: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(PeriodReportState.waiting_for_zip_interval)
     msg_prompt = (
-        "✍️ <b>ZIP архив учун керакли даврни ёзиб юборинг:</b>\n\n"
+        "✍️ <b>ZIP архив учун исталган йил ёки ойни ёзиб юборинг:</b>\n\n"
         "Масалан:\n"
+        "• <code>2025</code> (2025 йил тўлиқ)\n"
+        "• <code>2024</code> (2024 йил тўлиқ)\n"
         "• <code>2026-04</code> (бир ой учун)\n"
-        "• <code>2026-01 - 2026-06</code> (давр учун)\n\n"
+        "• <code>2025-09 - 2026-05</code> (ўқув йили учун)\n\n"
         "<i>Бекор қилиш учун /cancel деб ёзинг.</i>"
     )
     await cb.message.edit_text(msg_prompt, parse_mode="HTML")
@@ -1698,21 +1727,10 @@ async def handle_zip_custom_interval(message: types.Message, state: FSMContext):
         await message.answer("❌ Бекор қилинди.", reply_markup=main_kb(message.from_user.id))
         return
 
-    import re
-    matches = re.findall(r'\b(202[0-9]|201[0-9])[\.\/\-](\d{1,2})\b', text)
-    if not matches:
-        await message.answer("⚠️ <b>Нотўғри формат!</b>\nИлтимос, <code>2026-04</code> ёки <code>2026-01 - 2026-06</code> кўринишида ёзинг.", parse_mode="HTML")
+    start_ym, end_ym = parse_user_interval(text)
+    if not start_ym:
+        await message.answer("⚠️ <b>Нотўғри формат!</b>\nИлтимос, <code>2025</code>, <code>2026-04</code> ёки <code>2025-09 - 2026-05</code> кўринишида ёзинг.", parse_mode="HTML")
         return
-
-    if len(matches) == 1:
-        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
-        end_ym = start_ym
-    else:
-        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
-        end_ym = f"{int(matches[1][0]):04d}-{int(matches[1][1]):02d}"
-
-    if start_ym > end_ym:
-        start_ym, end_ym = end_ym, start_ym
 
     period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
     await state.clear()
@@ -1910,11 +1928,13 @@ async def prompt_period_report(message: types.Message):
         ("Октябр", "2026-10"), ("Ноябр", "2026-11"), ("Декабр", "2026-12"),
     ]
     for lbl, ym in months:
-        kb.button(text=f"{lbl} ({ym[-2:]})", callback_data=f"rep_period:{ym}:{ym}")
+        kb.button(text=lbl, callback_data=f"rep_period:{ym}:{ym}")
 
-    kb.button(text="✍️ Бошқа интервал киритиш", callback_data="rep_custom_interval")
+    kb.button(text="📚 2025 йил тўлиқ", callback_data="rep_period:2025-01:2025-12")
+    kb.button(text="📚 2024 йил тўлиқ", callback_data="rep_period:2024-01:2024-12")
+    kb.button(text="✍️ Бошқа йил/интервал киритиш", callback_data="rep_custom_interval")
     kb.button(text="❌ Бекор қилиш", callback_data="cancel")
-    kb.adjust(2, 3, 3, 3, 3, 1, 1)
+    kb.adjust(2, 3, 3, 3, 3, 2, 1, 1)
 
     caption_txt = (
         "📅 <b>Илмий ишлар бўйича ҳисобот даврини (Йил ва Ой) танланг:</b>\n\n"
@@ -1984,10 +2004,11 @@ async def ask_custom_interval(cb: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(PeriodReportState.waiting_for_custom_interval)
     msg_prompt = (
-        "✍️ <b>Керакли интервални ёзиб юборинг:</b>\n\n"
+        "✍️ <b>Ҳисобот учун исталган йил ёки ойни ёзиб юборинг:</b>\n\n"
         "Масалан:\n"
+        "• <code>2025</code> (2025 йил тўлиқ ҳисоботи)\n"
+        "• <code>2024</code> (2024 йил тўлиқ ҳисоботи)\n"
         "• <code>2026-04</code> (бир ой учун)\n"
-        "• <code>2026-01 - 2026-06</code> (давр учун)\n"
         "• <code>2025-09 - 2026-05</code> (ўқув йили учун)\n\n"
         "<i>Бекор қилиш учун /cancel деб ёзинг.</i>"
     )
@@ -2006,21 +2027,10 @@ async def handle_custom_interval(message: types.Message, state: FSMContext):
         await message.answer("❌ Бекор қилинди.", reply_markup=main_kb(message.from_user.id))
         return
 
-    import re
-    matches = re.findall(r'\b(202[0-9]|201[0-9])[\.\/\-](\d{1,2})\b', text)
-    if not matches:
-        await message.answer("⚠️ <b>Нотўғри формат!</b>\nИлтимос, <code>2026-04</code> ёки <code>2026-01 - 2026-06</code> кўринишида ёзинг.", parse_mode="HTML")
+    start_ym, end_ym = parse_user_interval(text)
+    if not start_ym:
+        await message.answer("⚠️ <b>Нотўғри формат!</b>\nИлтимос, <code>2025</code>, <code>2026-04</code> ёки <code>2025-09 - 2026-05</code> кўринишида ёзинг.", parse_mode="HTML")
         return
-
-    if len(matches) == 1:
-        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
-        end_ym = start_ym
-    else:
-        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
-        end_ym = f"{int(matches[1][0]):04d}-{int(matches[1][1]):02d}"
-
-    if start_ym > end_ym:
-        start_ym, end_ym = end_ym, start_ym
 
     period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
     await state.clear()
