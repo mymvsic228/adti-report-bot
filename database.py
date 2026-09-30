@@ -487,14 +487,15 @@ async def get_all_detailed_entries() -> list:
         return await cur.fetchall()
 
 
-async def get_files_for_zip(category: str = None, dept_id: int = None) -> list:
-    """Возвращает все записи, у которых прикреплён файл (file_id не пустой)"""
+async def get_files_for_zip(category: str = None, dept_id: int = None, start_ym: str = None, end_ym: str = None) -> list:
+    """Возвращает все записи, у которых прикреплён файл (file_id не пустой), с поддержкой фильтра по периоду"""
     pool = await get_pg_pool()
     if pool:
         async with pool.acquire() as conn:
             query = """
                 SELECT i.id, i.dept_id, d.name as dept_name, i.category,
-                       i.title, i.authors, i.file_id, i.file_path, i.created_at
+                       i.title, i.authors, i.file_id, i.file_path, i.created_at,
+                       i.pub_date, i.year
                 FROM indicators i
                 JOIN departments d ON i.dept_id = d.id
                 WHERE (i.file_id IS NOT NULL AND i.file_id != '')
@@ -508,13 +509,26 @@ async def get_files_for_zip(category: str = None, dept_id: int = None) -> list:
                 query += f" AND i.dept_id = ${len(params)}"
             query += " ORDER BY i.category, i.dept_id, i.id"
             rows = await conn.fetch(query, *params)
-            return [dict(r) for r in rows]
+            res = [dict(r) for r in rows]
+
+            if start_ym or end_ym:
+                if start_ym and not end_ym: end_ym = start_ym
+                if end_ym and not start_ym: start_ym = end_ym
+                from report_gen import normalize_work_date
+                filtered = []
+                for r in res:
+                    yr, mth, day, ym, src = normalize_work_date(r.get('pub_date'), r.get('year'), r.get('created_at'))
+                    if start_ym <= ym <= end_ym:
+                        filtered.append(r)
+                return filtered
+            return res
 
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         query = """
             SELECT i.id, i.dept_id, d.name as dept_name, i.category,
-                   i.title, i.authors, i.file_id, i.file_path, i.created_at
+                   i.title, i.authors, i.file_id, i.file_path, i.created_at,
+                   i.pub_date, i.year
             FROM indicators i
             JOIN departments d ON i.dept_id = d.id
             WHERE (i.file_id IS NOT NULL AND i.file_id != '')
@@ -528,7 +542,20 @@ async def get_files_for_zip(category: str = None, dept_id: int = None) -> list:
             params.append(dept_id)
         query += " ORDER BY i.category, i.dept_id, i.id"
         cur = await db.execute(query, tuple(params))
-        return await cur.fetchall()
+        rows = await cur.fetchall()
+        res = [dict(r) for r in rows]
+
+        if start_ym or end_ym:
+            if start_ym and not end_ym: end_ym = start_ym
+            if end_ym and not start_ym: start_ym = end_ym
+            from report_gen import normalize_work_date
+            filtered = []
+            for r in res:
+                yr, mth, day, ym, src = normalize_work_date(r.get('pub_date'), r.get('year'), r.get('created_at'))
+                if start_ym <= ym <= end_ym:
+                    filtered.append(r)
+            return filtered
+        return res
 
 
 async def get_dept_entries(dept_id: int, limit: int = 15) -> list:
