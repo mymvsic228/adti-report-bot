@@ -77,6 +77,24 @@ def parse_user_interval(text: str):
     return None, None
 
 
+def build_zip_period_cat_kb(start_ym: str, end_ym: str):
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📦 Барча категориялар (Жами)", callback_data=f"ziprun:{start_ym}:{end_ym}:all")
+    kb.button(text="🔬 Scopus / WoS", callback_data=f"ziprun:{start_ym}:{end_ym}:scopus_wos")
+    kb.button(text="🎓 DSc ва PhD диссертациялар", callback_data=f"ziprun:{start_ym}:{end_ym}:cat_dissertations")
+    kb.button(text="💡 Патентлар", callback_data=f"ziprun:{start_ym}:{end_ym}:patent")
+    kb.button(text="📚 Монографиялар", callback_data=f"ziprun:{start_ym}:{end_ym}:monography")
+    kb.button(text="📄 ЎзОАК мақолалари", callback_data=f"ziprun:{start_ym}:{end_ym}:oak_uz")
+    kb.button(text="🌍 Россия ва хорижий ОАК", callback_data=f"ziprun:{start_ym}:{end_ym}:oak_ru_if")
+    kb.button(text="📑 Тезислар (Ўз / Хор)", callback_data=f"ziprun:{start_ym}:{end_ym}:theses")
+    kb.button(text="⚙️ Рац.таклиф ва амалиёт", callback_data=f"ziprun:{start_ym}:{end_ym}:practical")
+    kb.button(text="💼 Шартнома ва грантлар", callback_data=f"ziprun:{start_ym}:{end_ym}:grants_contracts")
+    kb.button(text="🏛 Кафедра анжуманлари", callback_data=f"ziprun:{start_ym}:{end_ym}:conferences")
+    kb.button(text="🔙 Даврни ўзгартириш", callback_data="zipmenu_period")
+    kb.adjust(1, 2, 2, 2, 2, 2, 1)
+    return kb.as_markup()
+
+
 class PeriodReportState(StatesGroup):
     waiting_for_custom_interval = State()
     waiting_for_zip_interval = State()
@@ -1740,10 +1758,95 @@ async def handle_zip_custom_interval(message: types.Message, state: FSMContext):
         await message.answer(f"📭 <b>{period_text} даврида бирорта файл топилмади.</b>", parse_mode="HTML")
         return
 
-    await message.answer(f"⏳ <b>{period_text} даври учун {len(entries)} та файл архивланиб юборилмоқда...</b>", parse_mode="HTML")
+    kb = build_zip_period_cat_kb(start_ym, end_ym)
+    caption_txt = (
+        f"📦 <b>{period_text} даври учун қайси категория файлларини юкламоқчисиз?</b>\n\n"
+        f"<i>Жами топилган файллар: {len(entries)} та.\n"
+        f"Сиз барча файлларни ёки фақат маълум категорияни (масалан, фақат Scopus ёки Патентлар) танлаб олишингиз мумкин.</i>"
+    )
+    await message.answer(caption_txt, reply_markup=kb, parse_mode="HTML")
 
-    label_info = f"{period_text} даври файллар архиви"
-    zip_name = f"ADTI_{start_ym}_{end_ym}_Fayllar.zip" if start_ym != end_ym else f"ADTI_{start_ym}_Fayllar.zip"
+
+@dp.callback_query(F.data.startswith("zip_period:"))
+async def choose_zip_period_category(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("❌ Рухсат йўқ", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    start_ym = parts[1]
+    end_ym = parts[2]
+    period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
+
+    kb = build_zip_period_cat_kb(start_ym, end_ym)
+    caption_txt = (
+        f"📦 <b>{period_text} даври учун қайси категория файлларини юкламоқчисиз?</b>\n\n"
+        f"<i>Сиз ушбу даврдаги барча файлларни ёки фақат алоҳида йўналиш (масалан, фақат Scopus, Диссертациялар ёки Патентлар) архивини олишингиз мумкин.</i>"
+    )
+    await cb.message.edit_text(caption_txt, reply_markup=kb, parse_mode="HTML")
+    await cb.answer()
+
+
+@dp.callback_query(F.data.startswith("ziprun:"))
+async def process_ziprun_download(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("❌ Рухсат йўқ", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    start_ym = parts[1]
+    end_ym = parts[2]
+    cat_key = parts[3]
+    period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
+
+    await cb.message.edit_text(
+        f"⏳ <b>{period_text} даври файллар архиви тайёрланмоқда...</b>\n"
+        f"<i>Файллар Telegram серверидан юкланиб, ZIP пакетга жойланмоқда. Илтимос, кутинг.</i>",
+        parse_mode="HTML"
+    )
+
+    entries = []
+    if cat_key == "all":
+        entries = await get_files_for_zip(start_ym=start_ym, end_ym=end_ym)
+        label_info = f"{period_text} (Барча категориялар)"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_Barcha_Fayllar.zip" if start_ym != end_ym else f"ADTI_{start_ym}_Barcha_Fayllar.zip"
+    elif cat_key == "cat_dissertations":
+        dsc = await get_files_for_zip(category="dsc", start_ym=start_ym, end_ym=end_ym)
+        phd = await get_files_for_zip(category="phd", start_ym=start_ym, end_ym=end_ym)
+        entries = dsc + phd
+        label_info = f"{period_text} (DSc ва PhD диссертациялари)"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_Dissertatsiyalar.zip"
+    elif cat_key == "theses":
+        th_uz = await get_files_for_zip(category="thesis_uz", start_ym=start_ym, end_ym=end_ym)
+        th_for = await get_files_for_zip(category="thesis_foreign", start_ym=start_ym, end_ym=end_ym)
+        entries = th_uz + th_for
+        label_info = f"{period_text} (Республика ва хорижий тезислар)"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_Tezislar.zip"
+    elif cat_key == "practical":
+        r = await get_files_for_zip(category="rationalizer", start_ym=start_ym, end_ym=end_ym)
+        i = await get_files_for_zip(category="implementation", start_ym=start_ym, end_ym=end_ym)
+        entries = r + i
+        label_info = f"{period_text} (Рационализаторлик ва амалиётга тадбиқ)"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_Ratsionalizatorlik.zip"
+    elif cat_key == "grants_contracts":
+        c = await get_files_for_zip(category="contracts", start_ym=start_ym, end_ym=end_ym)
+        g = await get_files_for_zip(category="grants", start_ym=start_ym, end_ym=end_ym)
+        entries = c + g
+        label_info = f"{period_text} (Шартнома ва грантлар)"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_Shartnomalar_Grantlar.zip"
+    else:
+        entries = await get_files_for_zip(category=cat_key, start_ym=start_ym, end_ym=end_ym)
+        cat_lbl = INDICATOR_LABELS.get(cat_key, cat_key)
+        label_info = f"{period_text} ({cat_lbl})"
+        zip_name = f"ADTI_{start_ym}_{end_ym}_{cat_key}.zip"
+
+    if not entries:
+        await cb.message.edit_text(
+            f"📭 <b>Ушбу давр ва категорияда бирорта файл топилмади.</b>\n<i>({label_info})</i>",
+            parse_mode="HTML"
+        )
+        await cb.answer()
+        return
 
     sent_parts = 0
     total_files_sent = 0
@@ -1757,7 +1860,7 @@ async def handle_zip_custom_interval(message: types.Message, state: FSMContext):
             part_filename = f"{part_base}_Part_{sent_parts:02d}.zip"
 
             await bot.send_document(
-                message.chat.id,
+                cb.message.chat.id,
                 types.BufferedInputFile(part_buf.getvalue(), filename=part_filename),
                 caption=f"📦 <b>{label_info}</b>\n"
                         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -1769,9 +1872,24 @@ async def handle_zip_custom_interval(message: types.Message, state: FSMContext):
             part_buf.close()
             await asyncio.sleep(0.3)
 
-        await message.answer(f"✅ <b>{label_info} тўлиқ юборилди! (Жами: {total_files_sent} та файл)</b>", parse_mode="HTML")
+        if sent_parts == 1:
+            await cb.message.edit_text(
+                f"✅ <b>Архив муваффақиятли юборилди!</b>\n"
+                f"📌 Бўлим: <b>{label_info}</b>\n"
+                f"📁 Жами юборилган файллар: <b>{total_files_sent} та</b>",
+                parse_mode="HTML"
+            )
+        else:
+            await cb.message.edit_text(
+                f"✅ <b>Барча {sent_parts} та ZIP қисм муваффақиятли юборилди!</b>\n"
+                f"📌 Бўлим: <b>{label_info}</b>\n"
+                f"📁 Жами юборилган файллар: <b>{total_files_sent} та</b>",
+                parse_mode="HTML"
+            )
     except Exception as ex:
-        await message.answer(f"❌ ZIP юборишда хатолик: {ex}")
+        await cb.message.edit_text(f"❌ ZIP архив юборишда хатолик: {ex}", parse_mode="HTML")
+
+    await cb.answer()
 
 
 @dp.callback_query(F.data.startswith("zip_"))
