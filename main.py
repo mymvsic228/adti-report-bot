@@ -52,6 +52,9 @@ class RestoreState(StatesGroup):
 class EditTitleState(StatesGroup):
     waiting_for_new_title = State()
 
+class PeriodReportState(StatesGroup):
+    waiting_for_custom_interval = State()
+
 class AddEntry(StatesGroup):
     choose_category = State()
     enter_title     = State()
@@ -152,6 +155,7 @@ def main_kb(user_id: int):
             [KeyboardButton(text="🏛 Сводный ҳисобот"), KeyboardButton(text="📊 Кафедра статистикаси")],
             [KeyboardButton(text="🤖 AI Сводный таҳлил"), KeyboardButton(text="🤖 AI Кафедра таҳлили")],
             [KeyboardButton(text="📊 Excel ҳисобот (.xlsx)"), KeyboardButton(text="📥 Word ҳисобот (.docx)")],
+            [KeyboardButton(text="📅 Давр бўйича ҳисобот (Йил-Ой)")],
             [KeyboardButton(text="📦 Файллар ZIP архиви"), KeyboardButton(text="🗂 Файллар базаси")],
             [KeyboardButton(text="🔑 Кафедралар пароллари"), KeyboardButton(text="🚪 Кафедрадан чиқиш")],
         ]
@@ -1734,6 +1738,155 @@ async def download_report(message: types.Message):
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "📊 <b>1-қисм:</b> 65 та кафедра сводкаси\n"
                 "📝 <b>2-қисм (Илова):</b> Илмий ишлар ва уларнинг муаллифлари (шаффофлик рўйхати)",
+        parse_mode="HTML"
+    )
+
+
+# ─── ADMIN: ОТЧЁТЫ ПО ИНТЕРВАЛУ (ГОД + МЕСЯЦ) ──────────────────────────────
+@dp.message(F.text == "📅 Давр бўйича ҳисобот (Йил-Ой)")
+async def prompt_period_report(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📅 1-ярим йиллик (01—06)", callback_data="rep_period:2026-01:2026-06")
+    kb.button(text="📅 2-ярим йиллик (07—12)", callback_data="rep_period:2026-07:2026-12")
+
+    months = [
+        ("Январ", "2026-01"), ("Феврал", "2026-02"), ("Март", "2026-03"),
+        ("Апрел", "2026-04"), ("Май", "2026-05"), ("Июн", "2026-06"),
+        ("Июл", "2026-07"), ("Август", "2026-08"), ("Сентябр", "2026-09"),
+        ("Октябр", "2026-10"), ("Ноябр", "2026-11"), ("Декабр", "2026-12"),
+    ]
+    for lbl, ym in months:
+        kb.button(text=f"{lbl} ({ym[-2:]})", callback_data=f"rep_period:{ym}:{ym}")
+
+    kb.button(text="✍️ Бошқа интервал киритиш", callback_data="rep_custom_interval")
+    kb.button(text="❌ Бекор қилиш", callback_data="cancel")
+    kb.adjust(2, 3, 3, 3, 3, 1, 1)
+
+    caption_txt = (
+        "📅 <b>Илмий ишлар бўйича ҳисобот даврини (Йил ва Ой) танланг:</b>\n\n"
+        "<i>Танланган давр учун 65 та кафедранинг барча кўрсаткичлари қайта ҳисобланади "
+        "ва алоҳида Excel ҳамда Word файллари шакллантирилади.</i>"
+    )
+    await message.answer(caption_txt, reply_markup=kb.as_markup(), parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("rep_period:"))
+async def process_period_report(cb: types.CallbackQuery):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("❌ Рухсат йўқ", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    start_ym = parts[1]
+    end_ym = parts[2]
+
+    period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
+    await cb.message.edit_text(f"⏳ <b>{period_text} даври учун Excel ва Word ҳисоботлар тайёрланмоқда...</b>", parse_mode="HTML")
+
+    summary_rows = await get_all_summary()
+    detailed_rows = await get_all_detailed_entries()
+
+    buf_xl = await generate_report_excel(summary_rows, detailed_rows, start_ym=start_ym, end_ym=end_ym)
+    buf_doc = await generate_report_docx(summary_rows, detailed_rows, start_ym=start_ym, end_ym=end_ym)
+
+    xl_cap = (
+        f"✅ <b>АДТИ {period_text} даври Excel ҳисоботи (.xlsx)</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 1-варақ: 65 та кафедра қайта ҳисобланган сводкаси\n"
+        f"📝 2-варақ: Ушбу даврдаги барча ишлар базаси (автофильтр билан)\n"
+        f"🏆 3-варақ: Кафедраларнинг мазкур даврдаги фаоллик рейтинги"
+    )
+    await bot.send_document(
+        cb.message.chat.id,
+        types.BufferedInputFile(buf_xl.read(), filename=f"ADTI_{period_text}_hisobot.xlsx"),
+        caption=xl_cap,
+        parse_mode="HTML"
+    )
+
+    doc_cap = (
+        f"✅ <b>АДТИ {period_text} даври Word расмий ҳисоботи (.docx)</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 1-қисм: 65 та кафедранинг {period_text} даври сводкаси\n"
+        f"📝 2-қисм: Мазкур даврдаги илмий ишларнинг батафсил рўйхати"
+    )
+    await bot.send_document(
+        cb.message.chat.id,
+        types.BufferedInputFile(buf_doc.read(), filename=f"ADTI_{period_text}_hisobot.docx"),
+        caption=doc_cap,
+        parse_mode="HTML"
+    )
+    await cb.answer()
+
+
+@dp.callback_query(F.data == "rep_custom_interval")
+async def ask_custom_interval(cb: types.CallbackQuery, state: FSMContext):
+    if cb.from_user.id not in ADMIN_IDS:
+        await cb.answer("❌ Рухсат йўқ", show_alert=True)
+        return
+
+    await state.set_state(PeriodReportState.waiting_for_custom_interval)
+    msg_prompt = (
+        "✍️ <b>Керакли интервални ёзиб юборинг:</b>\n\n"
+        "Масалан:\n"
+        "• <code>2026-04</code> (бир ой учун)\n"
+        "• <code>2026-01 - 2026-06</code> (давр учун)\n"
+        "• <code>2025-09 - 2026-05</code> (ўқув йили учун)\n\n"
+        "<i>Бекор қилиш учун /cancel деб ёзинг.</i>"
+    )
+    await cb.message.edit_text(msg_prompt, parse_mode="HTML")
+    await cb.answer()
+
+
+@dp.message(PeriodReportState.waiting_for_custom_interval, F.text)
+async def handle_custom_interval(message: types.Message, state: FSMContext):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    text = message.text.strip()
+    if text in ("/cancel", "❌ Бекор қилиш", "cancel"):
+        await state.clear()
+        await message.answer("❌ Бекор қилинди.", reply_markup=main_kb(message.from_user.id))
+        return
+
+    import re
+    matches = re.findall(r'\b(202[0-9]|201[0-9])[\.\/\-](\d{1,2})\b', text)
+    if not matches:
+        await message.answer("⚠️ <b>Нотўғри формат!</b>\nИлтимос, <code>2026-04</code> ёки <code>2026-01 - 2026-06</code> кўринишида ёзинг.", parse_mode="HTML")
+        return
+
+    if len(matches) == 1:
+        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
+        end_ym = start_ym
+    else:
+        start_ym = f"{int(matches[0][0]):04d}-{int(matches[0][1]):02d}"
+        end_ym = f"{int(matches[1][0]):04d}-{int(matches[1][1]):02d}"
+
+    if start_ym > end_ym:
+        start_ym, end_ym = end_ym, start_ym
+
+    period_text = start_ym if start_ym == end_ym else f"{start_ym} — {end_ym}"
+    await state.clear()
+    await message.answer(f"⏳ <b>{period_text} даври учун Excel ва Word ҳисоботлар тайёрланмоқда...</b>", parse_mode="HTML")
+
+    summary_rows = await get_all_summary()
+    detailed_rows = await get_all_detailed_entries()
+
+    buf_xl = await generate_report_excel(summary_rows, detailed_rows, start_ym=start_ym, end_ym=end_ym)
+    buf_doc = await generate_report_docx(summary_rows, detailed_rows, start_ym=start_ym, end_ym=end_ym)
+
+    await bot.send_document(
+        message.chat.id,
+        types.BufferedInputFile(buf_xl.read(), filename=f"ADTI_{period_text}_hisobot.xlsx"),
+        caption=f"✅ <b>АДТИ {period_text} даври Excel ҳисоботи (.xlsx)</b>",
+        parse_mode="HTML"
+    )
+    await bot.send_document(
+        message.chat.id,
+        types.BufferedInputFile(buf_doc.read(), filename=f"ADTI_{period_text}_hisobot.docx"),
+        caption=f"✅ <b>АДТИ {period_text} даври Word расмий ҳисоботи (.docx)</b>",
         parse_mode="HTML"
     )
 
