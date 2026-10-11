@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -766,15 +766,21 @@ async def go_to_next_extra_step(message: types.Message, state: FSMContext):
         # Все доп-шаги пройдены — запрашиваем файл
         if cat == "conferences":
             file_prompt = (
-                "📎 <b>[6/6-қадам] Асос:</b>\n"
-                "<i>(Расм ёки баённома PDF кўринишида юборинг)</i>\n\n"
-                "Ёки 👇 тугмани босинг:"
+                "📎 <b>[6/6-қадам] Асос (Тасдиқловчи ҳужжат):</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "Анжуман дастури, сертификат ёки баённомани юборинг:\n"
+                "• <b>PDF</b> ёки <b>Word (.docx)</b> файли (20 МБ гача)\n"
+                "• Ёки <b>Фото скан / расм</b>\n\n"
+                "<i>Файл бўлмаса, «⏭ Файлсиз давом этиш» тугмасини босинг:</i>"
             )
         else:
             file_prompt = (
-                "📎 <b>Тасдиқловчи ҳужжатни юборинг</b>\n"
-                "<i>(PDF, Word ёки фото скан)</i>\n\n"
-                "Ёки 👇 тугмани босинг:"
+                "📎 <b>Тасдиқловчи ҳужжатни юборинг:</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "Илтимос, тасдиқловчи ҳужжатни бириктиринг:\n"
+                "• <b>PDF</b> ёки <b>Word (.docx)</b> файли (20 МБ гача)\n"
+                "• Ёки <b>Фото скан / расм</b>\n\n"
+                "<i>Файл бўлмаса, «⏭ Файлсиз давом этиш» тугмасини босинг:</i>"
             )
         await message.answer(
             file_prompt,
@@ -871,9 +877,35 @@ async def enter_authors(message: types.Message, state: FSMContext):
     await go_to_next_extra_step(message, state)
 
 
+# ─── FALLBACK: Агар фойдаланувчи файлни эрта юборса ──────────────────────────
+@dp.message(StateFilter(
+    AddEntry.choose_category,
+    AddEntry.enter_title,
+    AddEntry.enter_authors,
+    AddEntry.enter_country,
+    AddEntry.enter_journal,
+    AddEntry.enter_pub_date,
+    AddEntry.enter_url,
+    AddEntry.enter_authors_count,
+    AddEntry.enter_specialty,
+    AddEntry.enter_reg_number,
+    AddEntry.enter_publisher,
+    AddEntry.enter_venue,
+    AddEntry.enter_amount,
+), F.document | F.photo)
+async def early_file_warning(message: types.Message):
+    await message.answer(
+        "⚠️ <b>Сиз файл юбордингиз!</b>\n\n"
+        "Илтимос, аввал сўралган маълумотни <b>матн кўринишида</b> ёзиб юборинг.\n"
+        "Тасдиқловчи ҳужжат файлини (PDF, Word ёки расм) эса кейинги — охирги босқичда юклайсиз. 👇",
+        parse_mode="HTML"
+    )
+
+
 # ─── ШАГ 4 — ФАЙЛ (документ) ─────────────────────────────────────────────────
 @dp.message(AddEntry.upload_file, F.document)
 async def receive_doc(message: types.Message, state: FSMContext):
+    wait_msg = await message.answer("⏳ <b>Ҳужжат қабул қилинди, текширилмоқда ва сақланмоқда...</b>", parse_mode="HTML")
     # Читаем dept_id из FSM state (более надёжно, чем из DB)
     data = await state.get_data()
     dept_id = data.get('dept_id')
@@ -896,9 +928,16 @@ async def receive_doc(message: types.Message, state: FSMContext):
             file_obj = await bot.get_file(file_id)
             await bot.download_file(file_obj.file_path, destination=str(dest))
             dest_str = str(dest)
+        else:
+            logger.info(f"File size {f.file_size} > 20 MB, stored Telegram file_id only")
     except Exception as e_dl:
         logger.warning(f"Could not download doc locally: {e_dl}")
         dest_str = ""
+
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
 
     await save_entry(message, state, file_path=dest_str, file_id=file_id)
 
@@ -906,6 +945,7 @@ async def receive_doc(message: types.Message, state: FSMContext):
 # ─── ШАГ 4 — ФАЙЛ (фото) ─────────────────────────────────────────────────────
 @dp.message(AddEntry.upload_file, F.photo)
 async def receive_photo(message: types.Message, state: FSMContext):
+    wait_msg = await message.answer("⏳ <b>Расм қабул қилинди, текширилмоқда ва сақланмоқда...</b>", parse_mode="HTML")
     # Читаем dept_id из FSM state (более надёжно, чем из DB)
     data = await state.get_data()
     dept_id = data.get('dept_id')
@@ -930,6 +970,11 @@ async def receive_photo(message: types.Message, state: FSMContext):
         logger.warning(f"Could not download photo locally: {e_dl}")
         dest_str = ""
 
+    try:
+        await wait_msg.delete()
+    except Exception:
+        pass
+
     await save_entry(message, state, file_path=dest_str, file_id=file_id)
 
 
@@ -939,6 +984,24 @@ async def skip_file(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.edit_reply_markup(reply_markup=None)
     await save_entry(cb.message, state, file_path='', file_id='', user_id=cb.from_user.id)
     await cb.answer()
+
+
+# ─── ШАГ 4 — FALLBACK: НОТЎҒРИ ФОРМАТ / МАТН ЮБОРИЛГАНДА ─────────────────────
+@dp.message(AddEntry.upload_file)
+async def fallback_upload_file(message: types.Message, state: FSMContext):
+    if await check_menu_or_cancel(message, state):
+        return
+
+    await message.answer(
+        "⚠️ <b>Илтимос, тасдиқловчи ҳужжатни файл ёки фото кўринишида юборинг!</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📎 Ҳужжатни Telegram скрепкаси 📎 орқали юборинг:\n"
+        "• <b>Файл (Document):</b> PDF ёки Word (.docx, .doc)\n"
+        "• <b>Фото (Photo):</b> Расм ёки ҳужжат скани\n\n"
+        "<i>Агар ҳужжат ҳозир ёнингизда бўлмаса, «⏭ Файлсиз давом этиш» тугмасини босинг:</i>",
+        reply_markup=skip_kb(),
+        parse_mode="HTML"
+    )
 
 
 # ─── ОТМЕНА ──────────────────────────────────────────────────────────────────
@@ -1045,8 +1108,8 @@ async def save_entry(message: types.Message, state: FSMContext,
         "title": title,
         "authors": authors,
         "year": 2026,
-        "has_file": bool(file_path),
-        "file_name": Path(file_path).name if file_path else "",
+        "has_file": bool(file_path or file_id),
+        "file_name": Path(file_path).name if file_path else ("photo.jpg" if file_id.startswith("AgAC") else "document.pdf" if file_id else ""),
         "entry_id": entry_id,
         "country": country,
         "journal_name": journal_name,
