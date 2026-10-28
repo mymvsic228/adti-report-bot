@@ -11,12 +11,10 @@ from config import GEMINI_API_KEY
 logger = logging.getLogger(__name__)
 
 AVAILABLE_MODELS = [
-    "gemini-3.1-flash-lite",
-    "gemini-3.7-flash",
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
     "gemini-flash-latest",
-    "gemma-4-31b-it",
-    "gemini-3.5-flash",
-    "gemini-3.6-flash",
+    "gemini-2.5-pro",
 ]
 
 CATEGORY_LABELS = {
