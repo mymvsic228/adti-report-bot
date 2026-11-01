@@ -127,8 +127,13 @@ async def get_pg_pool():
         _pg_pool = None
     if _pg_pool is None and DATABASE_URL:
         try:
-            _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
-            logger.info("Connected to PostgreSQL pool successfully.")
+            _pg_pool = await asyncpg.create_pool(
+                DATABASE_URL,
+                min_size=0,
+                max_size=5,
+                max_inactive_connection_lifetime=60.0
+            )
+            logger.info("Connected to PostgreSQL pool successfully (serverless auto-sleep enabled).")
         except Exception as e:
             logger.error(f"Failed to connect to PostgreSQL: {e}")
             _pg_pool = None
