@@ -2550,8 +2550,34 @@ async def force_sync_sheets(message: types.Message):
 
 # ─── KEEP-ALIVE HTTP СЕРВЕР ─────────────────────────────────────────────────
 async def health_handler(request):
+    db_info = "unknown"
+    indicators_cnt = 0
+    try:
+        from database import get_pg_pool, reset_pg_pool
+        pool = await get_pg_pool()
+        if pool:
+            async with pool.acquire() as conn:
+                indicators_cnt = await conn.fetchval("SELECT count(*) FROM indicators")
+            db_info = f"connected (PostgreSQL: {indicators_cnt} indicators)"
+        else:
+            db_info = "offline or fallback (SQLite)"
+    except Exception as e:
+        db_info = f"error: {e}"
+        try:
+            from database import reset_pg_pool
+            await reset_pg_pool()
+        except Exception:
+            pass
+
     return web.Response(
-        text=json.dumps({"status": "ok", "bot": "ADTI Report Bot", "version": "2.1"}),
+        text=json.dumps({
+            "status": "ok",
+            "bot": "ADTI Report Bot",
+            "version": "2.2",
+            "database": db_info,
+            "indicators": indicators_cnt,
+            "ai_configured": bool(GEMINI_API_KEY)
+        }, ensure_ascii=False),
         content_type="application/json"
     )
 
