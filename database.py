@@ -112,8 +112,19 @@ INDICATOR_LABELS = {k: v for k, v in INDICATORS}
 # ─── ASYNCPG POOL ───────────────────────────────────────────────────────────
 _pg_pool = None
 
+async def reset_pg_pool():
+    global _pg_pool
+    if _pg_pool is not None:
+        try:
+            await _pg_pool.close()
+        except Exception:
+            pass
+        _pg_pool = None
+
 async def get_pg_pool():
     global _pg_pool
+    if _pg_pool is not None and getattr(_pg_pool, '_closed', False):
+        _pg_pool = None
     if _pg_pool is None and DATABASE_URL:
         try:
             _pg_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
