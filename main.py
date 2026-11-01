@@ -16,7 +16,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL, AUDIT_CHANNEL_ID, ADMIN_MASTER_PIN
+from config import BOT_TOKEN, ADMIN_IDS, FILES_DIR, SHEET_WEBHOOK_URL, AUDIT_CHANNEL_ID, ADMIN_MASTER_PIN, GEMINI_API_KEY
 from database import (
     init_db, get_department, get_dept_by_user, get_dept_by_code,
     bind_user_to_dept, unbind_user, add_entry, get_dept_summary, get_all_summary,
@@ -2550,36 +2550,49 @@ async def force_sync_sheets(message: types.Message):
 
 # ─── KEEP-ALIVE HTTP СЕРВЕР ─────────────────────────────────────────────────
 async def health_handler(request):
-    db_info = "unknown"
-    indicators_cnt = 0
     try:
-        from database import get_pg_pool, reset_pg_pool
-        pool = await get_pg_pool()
-        if pool:
-            async with pool.acquire() as conn:
-                indicators_cnt = await conn.fetchval("SELECT count(*) FROM indicators")
-            db_info = f"connected (PostgreSQL: {indicators_cnt} indicators)"
-        else:
-            db_info = "offline or fallback (SQLite)"
-    except Exception as e:
-        db_info = f"error: {e}"
+        db_info = "unknown"
+        indicators_cnt = 0
         try:
-            from database import reset_pg_pool
-            await reset_pg_pool()
-        except Exception:
-            pass
+            from database import get_pg_pool, reset_pg_pool
+            pool = await get_pg_pool()
+            if pool:
+                async with pool.acquire() as conn:
+                    indicators_cnt = await conn.fetchval("SELECT count(*) FROM indicators")
+                db_info = f"connected (PostgreSQL: {indicators_cnt} indicators)"
+            else:
+                db_info = "offline or fallback (SQLite)"
+        except Exception as e:
+            db_info = f"error: {e}"
+            try:
+                from database import reset_pg_pool
+                await reset_pg_pool()
+            except Exception:
+                pass
 
-    return web.Response(
-        text=json.dumps({
-            "status": "ok",
-            "bot": "ADTI Report Bot",
-            "version": "2.2",
-            "database": db_info,
-            "indicators": indicators_cnt,
-            "ai_configured": bool(GEMINI_API_KEY)
-        }, ensure_ascii=False),
-        content_type="application/json"
-    )
+        try:
+            from config import GEMINI_API_KEY
+            ai_ok = bool(GEMINI_API_KEY)
+        except Exception:
+            ai_ok = False
+
+        return web.Response(
+            text=json.dumps({
+                "status": "ok",
+                "bot": "ADTI Report Bot",
+                "version": "2.2",
+                "database": db_info,
+                "indicators": indicators_cnt,
+                "ai_configured": ai_ok
+            }, ensure_ascii=False),
+            content_type="application/json"
+        )
+    except Exception as top_err:
+        return web.Response(
+            text=json.dumps({"status": "error", "error": str(top_err)}),
+            content_type="application/json",
+            status=500
+        )
 
 
 async def start_web_server():
