@@ -3,7 +3,7 @@
 __pycache__/
 *.pyc
 *.pyo
-*.db
 .venv/
 uploads/
 *.log
+*.bak
